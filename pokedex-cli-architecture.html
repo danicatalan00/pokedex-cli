@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>pokedex-cli Architecture Diagram</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'JetBrains Mono', monospace;
+      background: #020617;
+      min-height: 100vh;
+      padding: 2rem;
+      color: white;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+    .header { margin-bottom: 2rem; }
+    .header-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem; }
+    .pulse-dot { width: 12px; height: 12px; background: #22d3ee; border-radius: 50%; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.025em; }
+    .subtitle { color: #94a3b8; font-size: 0.875rem; margin-left: 1.75rem; }
+    .diagram-container {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 1rem;
+      border: 1px solid #1e293b;
+      padding: 1.5rem;
+      overflow-x: auto;
+    }
+    svg { width: 100%; min-width: 1000px; display: block; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1rem;
+      margin-top: 2rem;
+    }
+    .card {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 0.75rem;
+      border: 1px solid #1e293b;
+      padding: 1.25rem;
+    }
+    .card-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .card-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .card-dot.cyan { background: #22d3ee; }
+    .card-dot.emerald { background: #34d399; }
+    .card-dot.violet { background: #a78bfa; }
+    .card-dot.amber { background: #fbbf24; }
+    .card h3 { font-size: 0.875rem; font-weight: 600; }
+    .card ul { list-style: none; color: #94a3b8; font-size: 0.75rem; }
+    .card li { margin-bottom: 0.375rem; }
+    .card code { color: #cbd5e1; }
+    .footer { text-align: center; margin-top: 1.5rem; color: #475569; font-size: 0.75rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <div class="header-row">
+        <div class="pulse-dot"></div>
+        <h1>pokedex-cli — Arquitectura</h1>
+      </div>
+      <p class="subtitle">Pokédex de terminal: hook al abrir la shell, captura con RNG y persistencia local en SQLite. Sin servidores.</p>
+    </div>
+
+    <!-- Main Diagram -->
+    <div class="diagram-container">
+      <svg viewBox="0 0 1060 700">
+        <defs>
+          <marker id="a-slate" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#64748b"/></marker>
+          <marker id="a-cyan" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#22d3ee"/></marker>
+          <marker id="a-emerald" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#34d399"/></marker>
+          <marker id="a-amber" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#fbbf24"/></marker>
+          <marker id="a-violet" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#a78bfa"/></marker>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+
+        <!-- Background Grid -->
+        <rect width="100%" height="100%" fill="url(#grid)"/>
+
+        <!-- =========================== BOUNDARIES =========================== -->
+        <!-- Paquete Python -->
+        <rect x="206" y="44" width="404" height="600" rx="12" fill="rgba(6,78,59,0.04)" stroke="#34d399" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="218" y="64" fill="#34d399" font-size="10" font-weight="600">pokedex_cli · paquete Python</text>
+        <!-- Datos locales -->
+        <rect x="636" y="372" width="214" height="300" rx="12" fill="rgba(76,29,149,0.05)" stroke="#a78bfa" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="648" y="392" fill="#a78bfa" font-size="10" font-weight="600">~/.local/share/pokedex-cli</text>
+
+        <!-- =========================== ARROWS (behind boxes) =========================== -->
+        <!-- Entrada -> shim -->
+        <line x1="84" y1="168" x2="84" y2="358" stroke="#64748b" stroke-width="1.5" marker-end="url(#a-slate)"/>
+        <text x="72" y="264" fill="#94a3b8" font-size="8" text-anchor="end">capturar…</text>
+        <line x1="104" y1="278" x2="104" y2="358" stroke="#64748b" stroke-width="1.5" marker-end="url(#a-slate)"/>
+        <text x="116" y="320" fill="#94a3b8" font-size="8">hook 1-3</text>
+        <!-- shim -> cli -->
+        <line x1="164" y1="392" x2="226" y2="378" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#a-cyan)"/>
+        <text x="176" y="376" fill="#94a3b8" font-size="8">argv</text>
+
+        <!-- cli -> módulos (fan) -->
+        <line x1="380" y1="360" x2="422" y2="108" stroke="#34d399" stroke-width="1.3" marker-end="url(#a-emerald)"/>
+        <line x1="380" y1="366" x2="422" y2="192" stroke="#34d399" stroke-width="1.3" marker-end="url(#a-emerald)"/>
+        <line x1="380" y1="374" x2="422" y2="275" stroke="#34d399" stroke-width="1.3" marker-end="url(#a-emerald)"/>
+        <line x1="380" y1="382" x2="422" y2="355" stroke="#34d399" stroke-width="1.3" marker-end="url(#a-emerald)"/>
+        <line x1="380" y1="396" x2="422" y2="431" stroke="#34d399" stroke-width="1.3" marker-end="url(#a-emerald)"/>
+        <line x1="380" y1="404" x2="422" y2="509" stroke="#34d399" stroke-width="1.3" marker-end="url(#a-emerald)"/>
+        <line x1="380" y1="414" x2="422" y2="593" stroke="#34d399" stroke-width="1.3" marker-end="url(#a-emerald)"/>
+
+        <!-- módulos -> externo -->
+        <line x1="592" y1="100" x2="866" y2="102" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#a-amber)"/>
+        <text x="700" y="94" fill="#94a3b8" font-size="8" text-anchor="middle">subprocess</text>
+        <line x1="592" y1="188" x2="866" y2="120" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#a-amber)"/>
+        <text x="712" y="168" fill="#94a3b8" font-size="8" text-anchor="middle">render sprite</text>
+        <line x1="592" y1="120" x2="866" y2="176" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4,4" marker-end="url(#a-slate)"/>
+        <text x="726" y="146" fill="#94a3b8" font-size="8" text-anchor="middle">shiny_rate</text>
+
+        <!-- cargo -> cache (primer arranque) -->
+        <path d="M 866 250 C 820 330, 812 470, 810 566" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#a-slate)"/>
+        <text x="838" y="430" fill="#94a3b8" font-size="8" text-anchor="middle">copia 1er</text>
+        <text x="838" y="440" fill="#94a3b8" font-size="8" text-anchor="middle">arranque</text>
+
+        <!-- krabby_bridge -> cache (lee pool) -->
+        <path d="M 592 112 C 640 300, 690 470, 724 566" fill="none" stroke="#a78bfa" stroke-width="1.2" stroke-dasharray="4,4" marker-end="url(#a-violet)"/>
+        <text x="648" y="360" fill="#a78bfa" font-size="8" text-anchor="middle">lee pool</text>
+
+        <!-- pokeapi -> PokeAPI -->
+        <line x1="592" y1="510" x2="866" y2="512" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#a-amber)"/>
+        <text x="710" y="504" fill="#94a3b8" font-size="8" text-anchor="middle">GET /pokemon</text>
+
+        <!-- storage -> db -->
+        <line x1="592" y1="590" x2="654" y2="462" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#a-violet)"/>
+        <text x="636" y="540" fill="#a78bfa" font-size="8" text-anchor="middle">SQL</text>
+        <!-- paths -> last_seen -->
+        <line x1="592" y1="432" x2="654" y2="518" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#a-violet)"/>
+        <text x="612" y="470" fill="#a78bfa" font-size="8" text-anchor="middle">R/W</text>
+
+        <!-- =========================== ENTRADA (slate) =========================== -->
+        <rect x="24" y="110" width="140" height="58" rx="6" fill="#0f172a"/>
+        <rect x="24" y="110" width="140" height="58" rx="6" fill="rgba(30,41,59,0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="94" y="136" fill="white" font-size="12" font-weight="600" text-anchor="middle">Terminal</text>
+        <text x="94" y="152" fill="#94a3b8" font-size="9" text-anchor="middle">tú ejecutas pokedex</text>
+
+        <rect x="24" y="220" width="140" height="58" rx="6" fill="#0f172a"/>
+        <rect x="24" y="220" width="140" height="58" rx="6" fill="rgba(30,41,59,0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="94" y="246" fill="white" font-size="12" font-weight="600" text-anchor="middle">~/.zshrc</text>
+        <text x="94" y="262" fill="#94a3b8" font-size="9" text-anchor="middle">hook al abrir shell</text>
+
+        <rect x="24" y="360" width="140" height="66" rx="6" fill="#0f172a"/>
+        <rect x="24" y="360" width="140" height="66" rx="6" fill="rgba(30,41,59,0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="94" y="384" fill="white" font-size="12" font-weight="600" text-anchor="middle">pokedex (shim)</text>
+        <text x="94" y="400" fill="#94a3b8" font-size="9" text-anchor="middle">~/bin · bash</text>
+        <text x="94" y="414" fill="#94a3b8" font-size="8" text-anchor="middle">exec python -m pokedex_cli</text>
+
+        <!-- =========================== CLI (cyan) =========================== -->
+        <rect x="228" y="330" width="152" height="96" rx="6" fill="#0f172a"/>
+        <rect x="228" y="330" width="152" height="96" rx="6" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="304" y="356" fill="white" font-size="12" font-weight="600" text-anchor="middle">cli.py</text>
+        <text x="304" y="373" fill="#94a3b8" font-size="9" text-anchor="middle">argparse · router</text>
+        <text x="304" y="387" fill="#94a3b8" font-size="8" text-anchor="middle">cmd_hook · cmd_capturar</text>
+        <text x="304" y="399" fill="#94a3b8" font-size="8" text-anchor="middle">list · search · equipo</text>
+        <text x="304" y="411" fill="#22d3ee" font-size="8" text-anchor="middle">demo · completion · --help</text>
+
+        <!-- =========================== MÓDULOS (emerald) =========================== -->
+        <rect x="422" y="76" width="170" height="62" rx="6" fill="#0f172a"/>
+        <rect x="422" y="76" width="170" height="62" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="507" y="100" fill="white" font-size="11" font-weight="600" text-anchor="middle">krabby_bridge.py</text>
+        <text x="507" y="116" fill="#94a3b8" font-size="8" text-anchor="middle">elige especie·forma·shiny</text>
+        <text x="507" y="128" fill="#94a3b8" font-size="8" text-anchor="middle">pinta sprite (hook)</text>
+
+        <rect x="422" y="162" width="170" height="60" rx="6" fill="#0f172a"/>
+        <rect x="422" y="162" width="170" height="60" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="507" y="186" fill="white" font-size="11" font-weight="600" text-anchor="middle">animation.py</text>
+        <text x="507" y="202" fill="#94a3b8" font-size="8" text-anchor="middle">pokébola sobre el sprite ANSI</text>
+        <text x="507" y="214" fill="#94a3b8" font-size="8" text-anchor="middle">absorción · bamboleo · éxito/fuga</text>
+
+        <rect x="422" y="248" width="170" height="56" rx="6" fill="#0f172a"/>
+        <rect x="422" y="248" width="170" height="56" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="507" y="270" fill="white" font-size="11" font-weight="600" text-anchor="middle">capture.py</text>
+        <text x="507" y="286" fill="#94a3b8" font-size="8" text-anchor="middle">probabilidad de captura (RNG)</text>
+        <text x="507" y="298" fill="#fb7185" font-size="8" text-anchor="middle">capture_rate · 35%–96%</text>
+
+        <rect x="422" y="330" width="170" height="52" rx="6" fill="#0f172a"/>
+        <rect x="422" y="330" width="170" height="52" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="507" y="352" fill="white" font-size="11" font-weight="600" text-anchor="middle">display.py</text>
+        <text x="507" y="368" fill="#94a3b8" font-size="8" text-anchor="middle">tablas y paneles (rich)</text>
+
+        <rect x="422" y="406" width="170" height="52" rx="6" fill="#0f172a"/>
+        <rect x="422" y="406" width="170" height="52" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="507" y="428" fill="white" font-size="11" font-weight="600" text-anchor="middle">paths.py</text>
+        <text x="507" y="444" fill="#94a3b8" font-size="8" text-anchor="middle">rutas · last_seen R/W (atómico)</text>
+
+        <rect x="422" y="482" width="170" height="56" rx="6" fill="#0f172a"/>
+        <rect x="422" y="482" width="170" height="56" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="507" y="504" fill="white" font-size="11" font-weight="600" text-anchor="middle">pokeapi.py</text>
+        <text x="507" y="520" fill="#94a3b8" font-size="8" text-anchor="middle">enriquecido (HTTP, tolerante)</text>
+
+        <rect x="422" y="562" width="170" height="64" rx="6" fill="#0f172a"/>
+        <rect x="422" y="562" width="170" height="64" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="507" y="586" fill="white" font-size="11" font-weight="600" text-anchor="middle">storage.py</text>
+        <text x="507" y="602" fill="#94a3b8" font-size="8" text-anchor="middle">SQLite · esquema</text>
+        <text x="507" y="614" fill="#94a3b8" font-size="8" text-anchor="middle">migración capture_rate</text>
+
+        <!-- =========================== DATOS (violet) =========================== -->
+        <rect x="656" y="418" width="172" height="58" rx="6" fill="#0f172a"/>
+        <rect x="656" y="418" width="172" height="58" rx="6" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="742" y="440" fill="white" font-size="11" font-weight="600" text-anchor="middle">pokedex.db</text>
+        <text x="742" y="456" fill="#94a3b8" font-size="8" text-anchor="middle">captures (orden + shiny + equipo)</text>
+        <text x="742" y="468" fill="#94a3b8" font-size="8" text-anchor="middle">species_cache (tipos·stats·dex)</text>
+
+        <rect x="656" y="500" width="172" height="48" rx="6" fill="#0f172a"/>
+        <rect x="656" y="500" width="172" height="48" rx="6" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="742" y="522" fill="white" font-size="11" font-weight="600" text-anchor="middle">last_seen.json</text>
+        <text x="742" y="538" fill="#94a3b8" font-size="8" text-anchor="middle">último visto (anónimo)</text>
+
+        <rect x="656" y="568" width="172" height="58" rx="6" fill="#0f172a"/>
+        <rect x="656" y="568" width="172" height="58" rx="6" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="742" y="590" fill="white" font-size="11" font-weight="600" text-anchor="middle">krabby_pokemon.json</text>
+        <text x="742" y="606" fill="#94a3b8" font-size="8" text-anchor="middle">copia de la BD de krabby</text>
+        <text x="742" y="618" fill="#94a3b8" font-size="8" text-anchor="middle">(mega/gmax/regionales)</text>
+
+        <!-- =========================== EXTERNO (amber / slate) =========================== -->
+        <rect x="866" y="76" width="170" height="62" rx="6" fill="#0f172a"/>
+        <rect x="866" y="76" width="170" height="62" rx="6" fill="rgba(120,53,15,0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="951" y="100" fill="white" font-size="11" font-weight="600" text-anchor="middle">krabby</text>
+        <text x="951" y="116" fill="#94a3b8" font-size="8" text-anchor="middle">binario · subprocess</text>
+        <text x="951" y="128" fill="#94a3b8" font-size="8" text-anchor="middle">sprites ANSI truecolor</text>
+
+        <rect x="866" y="156" width="170" height="48" rx="6" fill="#0f172a"/>
+        <rect x="866" y="156" width="170" height="48" rx="6" fill="rgba(30,41,59,0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="951" y="178" fill="white" font-size="10" font-weight="600" text-anchor="middle">config.toml</text>
+        <text x="951" y="194" fill="#94a3b8" font-size="8" text-anchor="middle">~/.config/krabby · shiny_rate</text>
+
+        <rect x="866" y="222" width="170" height="56" rx="6" fill="#0f172a"/>
+        <rect x="866" y="222" width="170" height="56" rx="6" fill="rgba(30,41,59,0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="951" y="244" fill="white" font-size="10" font-weight="600" text-anchor="middle">cargo …/pokemon.json</text>
+        <text x="951" y="260" fill="#94a3b8" font-size="8" text-anchor="middle">fuente de datos de krabby</text>
+        <text x="951" y="271" fill="#94a3b8" font-size="8" text-anchor="middle">(caché de cargo)</text>
+
+        <rect x="866" y="486" width="170" height="62" rx="6" fill="#0f172a"/>
+        <rect x="866" y="486" width="170" height="62" rx="6" fill="rgba(120,53,15,0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="951" y="510" fill="white" font-size="11" font-weight="600" text-anchor="middle">PokeAPI</text>
+        <text x="951" y="526" fill="#94a3b8" font-size="8" text-anchor="middle">pokeapi.co (HTTP)</text>
+        <text x="951" y="538" fill="#94a3b8" font-size="8" text-anchor="middle">tipos·stats·dex·capture_rate</text>
+
+        <!-- =========================== LEYENDA =========================== -->
+        <text x="24" y="470" fill="white" font-size="10" font-weight="600">Leyenda</text>
+        <rect x="24" y="482" width="16" height="10" rx="2" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1"/>
+        <text x="46" y="490" fill="#94a3b8" font-size="8">CLI / router</text>
+        <rect x="24" y="498" width="16" height="10" rx="2" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1"/>
+        <text x="46" y="506" fill="#94a3b8" font-size="8">Módulo Python</text>
+        <rect x="24" y="514" width="16" height="10" rx="2" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1"/>
+        <text x="46" y="522" fill="#94a3b8" font-size="8">Datos locales</text>
+        <rect x="24" y="530" width="16" height="10" rx="2" fill="rgba(120,53,15,0.3)" stroke="#fbbf24" stroke-width="1"/>
+        <text x="46" y="538" fill="#94a3b8" font-size="8">Servicio / binario externo</text>
+        <rect x="24" y="546" width="16" height="10" rx="2" fill="rgba(30,41,59,0.5)" stroke="#94a3b8" stroke-width="1"/>
+        <text x="46" y="554" fill="#94a3b8" font-size="8">Entrada / config</text>
+        <line x1="24" y1="568" x2="40" y2="568" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4,4"/>
+        <text x="46" y="571" fill="#94a3b8" font-size="8">Opcional / 1er arranque</text>
+      </svg>
+    </div>
+
+    <!-- Info Cards -->
+    <div class="cards">
+      <div class="card">
+        <div class="card-header"><div class="card-dot cyan"></div><h3>Flujo: nueva terminal (hook)</h3></div>
+        <ul>
+          <li>• <code>.zshrc</code> llama a <code>pokedex hook 1-3</code></li>
+          <li>• <code>krabby_bridge</code> elige especie/forma/shiny replicando a krabby</li>
+          <li>• pinta el sprite con <code>krabby</code> (sin revelar el nombre)</li>
+          <li>• guarda en silencio <code>last_seen.json</code></li>
+          <li>• si algo falla → <code>krabby random</code>, la terminal nunca se rompe</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-dot emerald"></div><h3>Flujo: capturar (con RNG)</h3></div>
+        <ul>
+          <li>• lee <code>last_seen.json</code> (el que espera)</li>
+          <li>• cachea/enriquece vía <code>PokeAPI</code> si hay red</li>
+          <li>• <code>capture.py</code> tira el dado según <code>capture_rate</code></li>
+          <li>• <code>animation.py</code> lanza la pokébola sobre el sprite real</li>
+          <li>• si acierta → <code>INSERT</code> en <code>pokedex.db</code> + N.º Pokédex</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-dot violet"></div><h3>Datos y persistencia</h3></div>
+        <ul>
+          <li>• <code>pokedex.db</code>: <code>captures</code> + <code>species_cache</code></li>
+          <li>• migración idempotente (columna <code>capture_rate</code>)</li>
+          <li>• <code>last_seen.json</code>: último Pokémon visto</li>
+          <li>• <code>krabby_pokemon.json</code>: copia de la BD de krabby</li>
+          <li>• todo bajo <code>~/.local/share/pokedex-cli</code></li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <p class="footer">
+      pokedex-cli • CLI local en Python • krabby + PokeAPI + SQLite • sin servidores, sin daemons (hot-reload por invocación)
+    </p>
+  </div>
+</body>
+</html>
