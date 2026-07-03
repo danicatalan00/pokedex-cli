@@ -1,0 +1,4 @@
+# Documental: estas librerías se heredan del sistema vía `venv --system-site-packages`
+# (ver install.sh), no se instalan por pip. Versiones confirmadas en este equipo:
+rich==13.7.1
+requests==2.31.0
