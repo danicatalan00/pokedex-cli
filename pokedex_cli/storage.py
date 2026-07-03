@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS species_cache (
     species TEXT NOT NULL,
     form TEXT NOT NULL DEFAULT 'regular',
     pokedex_id INTEGER,
+    capture_rate INTEGER,
     types TEXT,
     hp INTEGER,
     atk INTEGER,
@@ -42,7 +43,16 @@ def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn) -> None:
+    """Añade columnas nuevas a bases de datos ya existentes (idempotente)."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(species_cache)")}
+    if "capture_rate" not in cols:
+        conn.execute("ALTER TABLE species_cache ADD COLUMN capture_rate INTEGER")
+        conn.commit()
 
 
 def insert_capture(conn, species: str, form: str, shiny: bool, caught_at: str) -> int:
@@ -82,11 +92,12 @@ def upsert_species_cache(conn, species: str, form: str, data: dict, fetched_at: 
     conn.execute(
         """
         INSERT INTO species_cache
-            (species, form, pokedex_id, types, hp, atk, def, spa, spd, spe,
+            (species, form, pokedex_id, capture_rate, types, hp, atk, def, spa, spd, spe,
              is_legendary, is_mythical, generation, flavor_text, form_data_exact, fetched_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(species, form) DO UPDATE SET
-            pokedex_id=excluded.pokedex_id, types=excluded.types,
+            pokedex_id=excluded.pokedex_id, capture_rate=excluded.capture_rate,
+            types=excluded.types,
             hp=excluded.hp, atk=excluded.atk, def=excluded.def,
             spa=excluded.spa, spd=excluded.spd, spe=excluded.spe,
             is_legendary=excluded.is_legendary, is_mythical=excluded.is_mythical,
@@ -97,6 +108,7 @@ def upsert_species_cache(conn, species: str, form: str, data: dict, fetched_at: 
             species,
             form,
             data.get("pokedex_id"),
+            data.get("capture_rate"),
             json.dumps(data.get("types", [])),
             data.get("hp"),
             data.get("atk"),

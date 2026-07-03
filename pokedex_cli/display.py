@@ -49,7 +49,8 @@ def render_list_table(console: Console, rows: list[dict]) -> None:
         console.print("Aún no has capturado ningún Pokémon. Prueba `pokedex capturar`.")
         return
     table = Table(box=box.SIMPLE_HEAVY)
-    table.add_column("ID", justify="right")
+    table.add_column("#", justify="right")
+    table.add_column("Nº Pokédex", justify="right")
     table.add_column("Pokémon")
     table.add_column("Tipos")
     table.add_column("Shiny", justify="center")
@@ -58,8 +59,10 @@ def render_list_table(console: Console, rows: list[dict]) -> None:
     for row in rows:
         name = display_name(row["species"], row["form"])
         types = type_badges(row["types"]) if row["types"] else "?"
+        dex = f"#{row['pokedex_id']:03d}" if row.get("pokedex_id") else "—"
         table.add_row(
             str(row["id"]),
+            dex,
             name,
             types,
             "✨" if row["shiny"] else "",

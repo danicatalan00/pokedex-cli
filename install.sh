@@ -27,4 +27,20 @@ exec env PYTHONPATH="\$PROJECT_DIR\${PYTHONPATH:+:\$PYTHONPATH}" "\$VENV_PY" -m 
 SHIM
 chmod +x "$HOME/bin/pokedex"
 
+# --- Autocompletado zsh -----------------------------------------------------
+ZFUNC_DIR="$HOME/.zfunc"
+mkdir -p "$ZFUNC_DIR"
+cp "$PROJECT_DIR/completions/_pokedex.zsh" "$ZFUNC_DIR/_pokedex"
+
+ZSHRC="$HOME/.zshrc"
+if [[ -f "$ZSHRC" ]] && ! grep -q 'pokedex-cli: autocompletado' "$ZSHRC"; then
+    cat >> "$ZSHRC" <<'ZBLOCK'
+
+# pokedex-cli: autocompletado
+fpath=(~/.zfunc $fpath)
+autoload -Uz compinit && compinit
+ZBLOCK
+    echo "Añadido ~/.zfunc al fpath en ~/.zshrc para el autocompletado."
+fi
+
 echo "Listo. Abre una terminal nueva o \`source ~/.zshrc\`."

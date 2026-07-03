@@ -79,6 +79,7 @@ def fetch_species_data(species: str, form: str) -> dict | None:
 
     return {
         "pokedex_id": species_json.get("id"),
+        "capture_rate": species_json.get("capture_rate"),
         "is_legendary": bool(species_json.get("is_legendary")),
         "is_mythical": bool(species_json.get("is_mythical")),
         "generation": species_json.get("generation", {}).get("name"),
