@@ -118,17 +118,16 @@ def cmd_capturar(args: argparse.Namespace) -> int:
         if cache is None:
             print("(sin datos de tipos/stats: sin conexión por ahora)")
     else:
+        breakout = capture.breakout_message()
         if fled:
             console.print(
-                f"[yellow]¡Oh no![/] El Pokémon se soltó de la Pokébola "
-                f"([dim]{round(chance * 100)}% de captura[/]) y huyó entre la hierba. "
+                f"[yellow]{breakout}[/] "
+                "¡El Pokémon salvaje ha huido! "
                 "Ya no hay ningún Pokémon a la vista."
             )
         else:
             console.print(
-                f"[yellow]¡Oh no![/] El Pokémon se soltó de la Pokébola "
-                f"([dim]{round(chance * 100)}% de captura[/]). "
-                "Sigue esperando: prueba otra vez con `pokedex capturar`."
+                f"[yellow]{breakout}[/] "
             )
     return 0
 

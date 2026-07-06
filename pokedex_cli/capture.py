@@ -57,6 +57,17 @@ def escape_after_attempts(capture_rate: int | None, speed: int | None = None,
     return r.randint(low, high)
 
 
+def breakout_message(rng: random.Random | None = None) -> str:
+    """Mensaje de fallo inspirado en los textos clásicos por sacudidas."""
+    r = rng or random
+    return r.choice([
+        "¡Oh, no! ¡El Pokémon se ha escapado!",
+        "¡Vaya! ¡Parecía que lo habías atrapado!",
+        "¡Aaaah! ¡Casi lo consigues!",
+        "¡Qué rabia! ¡Ha faltado muy poco!",
+    ])
+
+
 def roll_capture(chance: float, rng: random.Random | None = None) -> bool:
     r = rng or random
     return r.random() < chance
