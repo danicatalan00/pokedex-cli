@@ -49,7 +49,7 @@ def cmd_hook(args: argparse.Namespace) -> int:
 def cmd_ver(args: argparse.Namespace) -> int:
     last_seen = paths.read_last_seen()
     if last_seen is None:
-        print("No hay ningún Pokémon esperando. Abre una terminal nueva primero.")
+        print("No hay ningún Pokémon a la vista. Abre una terminal nueva primero.")
         return 1
     name = _display_name(last_seen["species"], last_seen["form"])
     if last_seen["shiny"]:
@@ -62,7 +62,7 @@ def cmd_ver(args: argparse.Namespace) -> int:
 def cmd_capturar(args: argparse.Namespace) -> int:
     last_seen = paths.read_last_seen()
     if last_seen is None:
-        print("No hay ningún Pokémon esperando. Abre una terminal nueva primero.")
+        print("No hay ningún Pokémon a la vista. Abre una terminal nueva primero.")
         return 1
     if last_seen["captured"]:
         print("Ya capturaste a este Pokémon. Espera a que aparezca otro (abre otra terminal).")
@@ -94,6 +94,20 @@ def cmd_capturar(args: argparse.Namespace) -> int:
     if caught:
         capture_id = storage.insert_capture(conn, species, form, shiny, _now_iso())
         paths.mark_last_seen_captured()
+        fled = False
+        attempts = escape_after = 0
+    else:
+        escape_after = capture.escape_after_attempts(
+            cache["capture_rate"] if cache is not None else None,
+            speed=cache["spe"] if cache is not None else None,
+            is_legendary=bool(cache["is_legendary"]) if cache is not None else False,
+            is_mythical=bool(cache["is_mythical"]) if cache is not None else False,
+            shiny=shiny,
+        )
+        attempts, escape_after = paths.record_last_seen_failed_capture(escape_after)
+        fled = attempts >= escape_after
+        if fled:
+            paths.clear_last_seen()
 
     animation.play_capture_animation(console, species, form, shiny, caught)
 
@@ -104,11 +118,18 @@ def cmd_capturar(args: argparse.Namespace) -> int:
         if cache is None:
             print("(sin datos de tipos/stats: sin conexión por ahora)")
     else:
-        console.print(
-            f"[yellow]¡Oh no![/] El Pokémon se soltó de la Pokébola "
-            f"([dim]{round(chance * 100)}% de captura[/]). "
-            "Sigue esperando: prueba otra vez con `pokedex capturar`."
-        )
+        if fled:
+            console.print(
+                f"[yellow]¡Oh no![/] El Pokémon se soltó de la Pokébola "
+                f"([dim]{round(chance * 100)}% de captura[/]) y huyó entre la hierba. "
+                "Ya no hay ningún Pokémon a la vista."
+            )
+        else:
+            console.print(
+                f"[yellow]¡Oh no![/] El Pokémon se soltó de la Pokébola "
+                f"([dim]{round(chance * 100)}% de captura[/]). "
+                "Sigue esperando: prueba otra vez con `pokedex capturar`."
+            )
     return 0
 
 

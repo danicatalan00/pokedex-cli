@@ -1,12 +1,6 @@
-"""Probabilidad de captura. Emula la mecánica original (a mayor `capture_rate`
-más fácil), pero es intencionadamente indulgente: siempre queda una opción
-razonable de atrapar hasta a un legendario, y los Pokémon comunes caen casi
-siempre. Un fallo no consume al Pokémon: se puede reintentar `pokedex capturar`."""
+"""Probabilidad de captura y huida."""
 
 import random
-
-MIN_CHANCE = 0.35   # ni el legendario más esquivo baja de aquí
-MAX_CHANCE = 0.96   # ni el más común es 100% seguro: siempre hay tensión
 
 # Slugs de legendarios/singulares emblemáticos (para la demo `--legendary`).
 LEGENDARY_SLUGS = [
@@ -28,20 +22,39 @@ def random_legendary(rng: random.Random | None = None) -> str:
 
 def catch_chance(capture_rate: int | None, is_legendary: bool = False,
                  is_mythical: bool = False, shiny: bool = False) -> float:
-    """Devuelve la probabilidad [MIN_CHANCE, MAX_CHANCE] de capturar."""
+    """Devuelve la probabilidad de capturar."""
     if capture_rate is None:
-        # Sin datos de PokeAPI: indulgente por defecto, algo más difícil si es
-        # legendario/singular.
+        # Sin datos de PokeAPI no hay capture_rate base que aplicar.
         base = 0.55 if (is_legendary or is_mythical) else 0.8
     else:
         # capture_rate va de 3 (legendarios) a 255 (los más fáciles).
-        # La raíz cuadrada levanta la curva para no castigar de más.
-        base = (capture_rate / 255) ** 0.5
+        base = capture_rate / 255
+    return max(0.0, min(1.0, base))
+
+
+def escape_after_attempts(capture_rate: int | None, speed: int | None = None,
+                          is_legendary: bool = False, is_mythical: bool = False,
+                          shiny: bool = False, rng: random.Random | None = None) -> int:
+    """Devuelve cuántos fallos aguanta antes de huir definitivamente."""
+    r = rng or random
+    catch_pressure = 1 - catch_chance(capture_rate, is_legendary, is_mythical, shiny)
+    speed_pressure = min(max((speed or 80) / 180, 0.0), 1.0)
+    pressure = (catch_pressure * 0.65) + (speed_pressure * 0.35)
+
     if is_legendary or is_mythical:
-        base *= 0.9  # un pelín más de emoción con los grandes
+        pressure = min(1.0, pressure + 0.15)
+
+    if pressure >= 0.75:
+        low, high = 2, 4
+    elif pressure >= 0.45:
+        low, high = 3, 5
+    else:
+        low, high = 4, 6
+
     if shiny:
-        base *= 0.9  # el shiny se lo piensa un poco más
-    return max(MIN_CHANCE, min(MAX_CHANCE, base))
+        high += 1
+
+    return r.randint(low, high)
 
 
 def roll_capture(chance: float, rng: random.Random | None = None) -> bool:

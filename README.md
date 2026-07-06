@@ -12,7 +12,7 @@ Nace de `chat-pokedex-cli.txt`, una conversación de chat donde surgió la idea.
   3. Guarda en silencio cuál fue en `~/.local/share/pokedex-cli/last_seen.json` (solo se recuerda el último).
   - Si algo falla (`krabby` desinstalado, caché de datos ausente, etc.), cae de vuelta al `krabby random` de siempre — la terminal nunca se rompe.
 - `pokedex capturar` intenta guardar ese último Pokémon (con su forma y si es shiny) en SQLite, con una animación de pokeball que se lanza **sobre el sprite real** del Pokémon (lo absorbe, bambolea y hace click), y lo enriquece con PokeAPI si hay red. No captura nada automáticamente: hay que pedirlo.
-  - **La captura no está garantizada.** Se tira el dado según el `capture_rate` real del Pokémon (indulgente: entre el 35% de un legendario y el 96% de uno común). Si se suelta, sigue esperando y puedes reintentarlo.
+  - **La captura no está garantizada.** Se tira el dado según el `capture_rate` real del Pokémon. Si se suelta, puede seguir esperando unos intentos más o huir definitivamente.
   - Al capturar se muestra su **N.º de Pokédex oficial** (p.ej. `#257`) además del orden de captura interno (`captura #1`).
 
 ## Comandos
