@@ -83,6 +83,23 @@ def render_sprite(species: str, form: str, shiny: bool, show_title: bool, info: 
     subprocess.run(args, check=True)
 
 
+def capture_sprite(species: str, form: str, shiny: bool) -> str | None:
+    """Devuelve el arte ANSI del sprite (stdout de krabby) como cadena, para
+    poder incrustarlo dentro de un layout de rich. None si krabby falla o no
+    está instalado."""
+    args = ["krabby", "name", species]
+    if form != "regular":
+        args += ["-f", form]
+    if shiny:
+        args.append("-s")
+    args.append("--no-title")
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    return result.stdout.rstrip("\n") or None
+
+
 def _best_effort_fallback(generations: str) -> None:
     try:
         subprocess.run(

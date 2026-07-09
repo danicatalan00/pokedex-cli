@@ -33,14 +33,32 @@ mkdir -p "$ZFUNC_DIR"
 cp "$PROJECT_DIR/completions/_pokedex.zsh" "$ZFUNC_DIR/_pokedex"
 
 ZSHRC="$HOME/.zshrc"
-if [[ -f "$ZSHRC" ]] && ! grep -q 'pokedex-cli: autocompletado' "$ZSHRC"; then
-    cat >> "$ZSHRC" <<'ZBLOCK'
+if [[ -f "$ZSHRC" ]] && ! grep -qF 'pokedex-cli: autocompletado' "$ZSHRC"; then
+    if grep -qF 'source $ZSH/oh-my-zsh.sh' "$ZSHRC"; then
+        # oh-my-zsh ejecuta compinit al hacer `source`, así que el fpath DEBE
+        # ir antes de esa línea o el completado nunca se carga.
+        TMP="$(mktemp)"
+        awk '
+            !inserted && index($0, "source $ZSH/oh-my-zsh.sh") {
+                print "# pokedex-cli: autocompletado (antes del compinit de oh-my-zsh)"
+                print "fpath=(\"$HOME/.zfunc\" $fpath)"
+                print ""
+                inserted = 1
+            }
+            { print }
+        ' "$ZSHRC" > "$TMP" && mv "$TMP" "$ZSHRC"
+        echo "Insertado ~/.zfunc en el fpath antes de oh-my-zsh en ~/.zshrc."
+    else
+        cat >> "$ZSHRC" <<'ZBLOCK'
 
 # pokedex-cli: autocompletado
-fpath=(~/.zfunc $fpath)
+fpath=("$HOME/.zfunc" $fpath)
 autoload -Uz compinit && compinit
 ZBLOCK
-    echo "Añadido ~/.zfunc al fpath en ~/.zshrc para el autocompletado."
+        echo "Añadido ~/.zfunc al fpath en ~/.zshrc para el autocompletado."
+    fi
+    # Fuerza a compinit a regenerar su caché para que recoja el nuevo completado.
+    rm -f "$HOME"/.zcompdump* 2>/dev/null || true
 fi
 
 echo "Listo. Abre una terminal nueva o \`source ~/.zshrc\`."

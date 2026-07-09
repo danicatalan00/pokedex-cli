@@ -29,6 +29,7 @@ _pokedex() {
     'capturar:intenta capturar el Pokémon que espera'
     'list:lista tus capturas'
     'search:ficha de cualquier Pokémon o forma'
+    'vision:vista enriquecida de un Pokémon capturado (sprite + ficha)'
     'equipo:ve o gestiona tu equipo (máx. 6)'
     'tipos:desglose de tus capturas por tipo'
     'ranking:ranking por suma de stats base'
@@ -52,6 +53,11 @@ _pokedex() {
           _arguments \
             '(-f --form)'{-f,--form}'[forma alternativa]:forma:' \
             '1:Pokémon:_pokedex_pokemon_names'
+          ;;
+        vision)
+          _arguments \
+            '(-f --form)'{-f,--form}'[desambigua la forma]:forma:' \
+            '1:captura:_pokedex_capture_ids'
           ;;
         demo)
           _arguments \

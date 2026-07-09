@@ -1,9 +1,10 @@
 import json
 
 from rich import box
-from rich.console import Console
+from rich.console import Console, Group
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 MEDALS = ["🥇", "🥈", "🥉"]
 
@@ -108,6 +109,151 @@ def render_search_card(console: Console, species: str, form: str, cache) -> None
         body += f"\n\n[italic]{cache['flavor_text']}[/]"
     console.print(Panel.fit(body, title=name, subtitle=" ".join(badges) or None))
     console.print(stats)
+
+
+STAT_LABELS = [
+    ("HP", "hp"),
+    ("Ataque", "atk"),
+    ("Defensa", "def"),
+    ("At. Esp.", "spa"),
+    ("Def. Esp.", "spd"),
+    ("Velocidad", "spe"),
+]
+
+GEN_ROMAN = {
+    "generation-i": "I", "generation-ii": "II", "generation-iii": "III",
+    "generation-iv": "IV", "generation-v": "V", "generation-vi": "VI",
+    "generation-vii": "VII", "generation-viii": "VIII", "generation-ix": "IX",
+}
+
+
+def _stat_color(value: int) -> str:
+    if value >= 130:
+        return "green1"
+    if value >= 100:
+        return "green3"
+    if value >= 80:
+        return "chartreuse3"
+    if value >= 60:
+        return "yellow3"
+    if value >= 40:
+        return "orange3"
+    return "red3"
+
+
+def _stat_bar(value: int, width: int = 16) -> str:
+    v = value or 0
+    filled = min(width, max(1, round(v / 200 * width))) if v else 0
+    color = _stat_color(v)
+    return f"[{color}]{'█' * filled}[/][grey30]{'━' * (width - filled)}[/]"
+
+
+def render_vision_card(console: Console, row: dict, sprite: str | None) -> None:
+    """Vista de detalle: sprite grande + ficha enriquecida, estilo pantalla
+    de Pokédex."""
+    species, form = row["species"], row["form"]
+    name = display_name(species, form)
+    types = row["types"] or []
+    primary = types[0] if types else "normal"
+    accent = TYPE_COLORS.get(primary, "cyan")
+
+    # --- Cabecera -----------------------------------------------------------
+    dex = f"#{row['pokedex_id']:03d}" if row.get("pokedex_id") else "#???"
+    header = Text()
+    header.append(f"N.º {dex}  ", style="bold grey62")
+    header.append(name, style=f"bold {accent}")
+    if row["shiny"]:
+        header.append("  ✨ shiny", style="bold yellow1")
+
+    blocks: list = [header]
+    if types:
+        blocks.append(Text.from_markup("  " + type_badges(types)))
+
+    # --- Stats con barras ---------------------------------------------------
+    if row["types"] is not None:
+        stats = Table.grid(padding=(0, 1))
+        stats.add_column(justify="right", style="bold grey70", min_width=9)
+        stats.add_column()
+        stats.add_column(justify="right", min_width=3)
+        total = 0
+        for label, key in STAT_LABELS:
+            v = row[key] or 0
+            total += v
+            stats.add_row(label, _stat_bar(v), f"[{_stat_color(v)}]{v}[/]")
+        stats.add_row("", "", "")
+        stats.add_row("[bold]Total[/]", "", f"[bold {accent}]{total}[/]")
+        blocks.append(stats)
+        if not row.get("form_data_exact", 1):
+            blocks.append(Text("stats de la forma base (sin datos exactos de la variante)",
+                               style="dim italic"))
+    else:
+        blocks.append(Text("Sin datos enriquecidos todavía (se capturó sin conexión).",
+                           style="dim italic"))
+
+    # --- Rareza -------------------------------------------------------------
+    badges = []
+    if row["is_legendary"]:
+        badges.append("[gold3]★ Legendario[/]")
+    if row["is_mythical"]:
+        badges.append("[magenta]✦ Singular[/]")
+    if badges:
+        blocks.append(Text.from_markup("  ".join(badges)))
+
+    # --- Descripción --------------------------------------------------------
+    if row.get("flavor_text"):
+        blocks.append(Panel(
+            Text(row["flavor_text"], style="italic grey85"),
+            box=box.ROUNDED, border_style="grey37", padding=(0, 1),
+        ))
+
+    # --- Pie: datos de la captura ------------------------------------------
+    gen = GEN_ROMAN.get(row.get("generation") or "", None)
+    foot = Text()
+    foot.append("Capturado: ", style="grey54")
+    foot.append(row["caught_at"][:10], style="grey85")
+    foot.append(f"   ·   captura #{row['id']}", style="grey54")
+    if gen:
+        foot.append(f"   ·   Gen {gen}", style="grey54")
+    if row["in_team"]:
+        foot.append("   ·   ", style="grey54")
+        foot.append("⭐ en tu equipo", style="gold3")
+    blocks.append(foot)
+
+    info = Group(*_interleave(blocks))
+
+    # --- Composición sprite | ficha ----------------------------------------
+    if sprite:
+        layout = Table.grid(padding=(0, 4))
+        layout.add_column(vertical="middle")
+        layout.add_column(vertical="middle")
+        layout.add_row(Text.from_ansi(sprite), info)
+        body: object = layout
+    else:
+        body = Group(
+            Text("(instala krabby para ver el sprite)", style="dim italic"),
+            Text(""),
+            info,
+        )
+
+    console.print(Panel(
+        body,
+        title=f"[bold {accent}]◓ POKÉDEX[/]",
+        title_align="left",
+        border_style=accent,
+        box=box.DOUBLE_EDGE,
+        padding=(1, 2),
+        expand=False,
+    ))
+
+
+def _interleave(blocks: list) -> list:
+    """Mete una línea en blanco entre bloques para respirar."""
+    out: list = []
+    for i, b in enumerate(blocks):
+        out.append(b)
+        if i < len(blocks) - 1:
+            out.append(Text(""))
+    return out
 
 
 def render_team_panel(console: Console, rows: list[dict]) -> None:

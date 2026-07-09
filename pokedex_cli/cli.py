@@ -30,11 +30,19 @@ def _row_with_cache(conn, capture_row) -> dict:
         row["is_legendary"] = cache["is_legendary"]
         row["is_mythical"] = cache["is_mythical"]
         row["pokedex_id"] = cache["pokedex_id"]
+        row["generation"] = cache["generation"]
+        row["flavor_text"] = cache["flavor_text"]
+        row["capture_rate"] = cache["capture_rate"]
+        row["form_data_exact"] = cache["form_data_exact"]
     else:
         row["types"] = None
         row["is_legendary"] = 0
         row["is_mythical"] = 0
         row["pokedex_id"] = None
+        row["generation"] = None
+        row["flavor_text"] = None
+        row["capture_rate"] = None
+        row["form_data_exact"] = 1
     return row
 
 
@@ -149,6 +157,45 @@ def cmd_search(args: argparse.Namespace) -> int:
             storage.upsert_species_cache(conn, species, form, data, _now_iso())
             cache = storage.get_species_cache(conn, species, form)
     display.render_search_card(console, species, form, cache)
+    return 0
+
+
+def _resolve_capture(conn, ident: str, form: str | None):
+    """Encuentra una captura por id numérico o por nombre de especie.
+    Si hay varias del mismo nombre, devuelve la más reciente (list_captures
+    ya viene ordenada por caught_at DESC)."""
+    if ident.isdigit():
+        return storage.get_capture(conn, int(ident))
+    species = ident.lower()
+    for row in storage.list_captures(conn):
+        if row["species"] == species and (form is None or row["form"] == form):
+            return row
+    return None
+
+
+def cmd_vision(args: argparse.Namespace) -> int:
+    """Vista enriquecida de un Pokémon que YA has capturado: sprite de krabby
+    + ficha completa de PokeAPI."""
+    conn = storage.get_connection()
+    cap = _resolve_capture(conn, args.pokemon, args.form)
+    if cap is None:
+        console.print(
+            f"No tienes ninguna captura que encaje con [bold]{args.pokemon}[/]. "
+            "Mira `pokedex list` para ver tus capturas "
+            "(o usa `pokedex search` para consultar sin capturar)."
+        )
+        return 1
+
+    row = _row_with_cache(conn, cap)
+    # Si se capturó sin conexión, intenta enriquecer ahora.
+    if row["types"] is None:
+        data = pokeapi.fetch_species_data(row["species"], row["form"])
+        if data is not None:
+            storage.upsert_species_cache(conn, row["species"], row["form"], data, _now_iso())
+            row = _row_with_cache(conn, cap)
+
+    sprite = krabby_bridge.capture_sprite(row["species"], row["form"], bool(row["shiny"]))
+    display.render_vision_card(console, row, sprite)
     return 0
 
 
@@ -322,6 +369,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="forma alternativa, p.ej. mega-x, gmax, alola (por defecto: regular)",
     )
     search_parser.set_defaults(func=cmd_search)
+
+    vision_parser = subparsers.add_parser(
+        "vision", help="vista enriquecida de un Pokémon capturado (sprite + ficha)",
+        description="Muestra en grande el sprite de uno de tus Pokémon capturados junto "
+        "a su ficha completa de PokeAPI: tipos, barras de stats, N.º de Pokédex, "
+        "rareza, descripción y datos de la captura.",
+    )
+    vision_parser.add_argument(
+        "pokemon", help="id de captura (como en `pokedex list`) o nombre de un Pokémon capturado",
+    )
+    vision_parser.add_argument(
+        "-f", "--form", default=None, metavar="FORMA",
+        help="desambigua la forma cuando buscas por nombre (p.ej. mega-x, alola)",
+    )
+    vision_parser.set_defaults(func=cmd_vision)
 
     equipo_parser = subparsers.add_parser(
         "equipo", help="ve o gestiona tu equipo (máx. 6)",
