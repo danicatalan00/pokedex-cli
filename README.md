@@ -12,7 +12,8 @@ Nace de `chat-pokedex-cli.txt`, una conversación de chat donde surgió la idea.
   3. Guarda en silencio cuál fue en `~/.local/share/pokedex-cli/last_seen.json` (solo se recuerda el último).
   - Si algo falla (`krabby` desinstalado, caché de datos ausente, etc.), cae de vuelta al `krabby random` de siempre — la terminal nunca se rompe.
 - `pokedex capturar` intenta guardar ese último Pokémon (con su forma y si es shiny) en SQLite, con una animación de pokeball que se lanza **sobre el sprite real** del Pokémon (lo absorbe, bambolea y hace click), y lo enriquece con PokeAPI si hay red. No captura nada automáticamente: hay que pedirlo.
-  - **La captura no está garantizada.** Se tira el dado según el `capture_rate` real del Pokémon. Si se suelta, puede seguir esperando unos intentos más o huir definitivamente.
+  - **La captura no está garantizada.** Se tira el dado según el `capture_rate` real del Pokémon y la bola elegida. Si se suelta, puede seguir esperando unos intentos más o huir definitivamente.
+  - La Pokébola normal (1×) es infinita. Superbola (1,5×), Ultrabola (2×) y Masterbola (captura garantizada) tienen stock y se gastan al lanzarlas.
   - Al capturar se muestra su **N.º de Pokédex oficial** (p.ej. `#257`) además del orden de captura interno (`captura #1`).
 
 ## Comandos
@@ -20,7 +21,8 @@ Nace de `chat-pokedex-cli.txt`, una conversación de chat donde surgió la idea.
 | Comando | Qué hace |
 |---|---|
 | `pokedex ver` | Muestra qué Pokémon está esperando, sin capturarlo |
-| `pokedex capturar` | Intenta capturar el Pokémon que está esperando (animación + RNG + guardado) |
+| `pokedex capturar [-b bola] [--debug]` | Elige una bola e intenta capturar; `--debug` muestra la probabilidad |
+| `pokedex bolsas [--info]` | Muestra stock y progreso; `--info` añade reglas y diagnóstico |
 | `pokedex list` | Lista tus capturas |
 | `pokedex search <nombre> [-f forma]` | Ficha de cualquier Pokémon/forma (ej. `pokedex search charizard -f mega-x`) |
 | `pokedex equipo` | Muestra tu equipo (hasta 6) |
@@ -30,6 +32,17 @@ Nace de `chat-pokedex-cli.txt`, una conversación de chat donde surgió la idea.
 | `pokedex legendarios` | Salón de la fama de legendarios/singulares capturados |
 | `pokedex demo [nombre]` | Prueba la animación de captura **sin guardar nada** (Pokémon al azar si no se indica) |
 | `pokedex completion zsh` | Imprime el script de autocompletado para zsh |
+
+### Cómo crecen las Pokébolas
+
+No hay tienda ni moneda. La Pokébola normal siempre está disponible y las bolas especiales crecen con actividad local:
+
+- El taller fabrica 1 Superbola cada 24 horas, hasta un máximo de 10.
+- Cada 3 commits laborales registrados concede 1 Superbola; cada 10, 1 Ultrabola; cada 50, 1 Masterbola.
+- Se consideran commits propios (según `git config user.email`) cuya fecha de autor sea de lunes a viernes entre las 08:00 y las 19:00. Se buscan automáticamente repositorios Git bajo `HOME`; se omiten cachés, dependencias y entornos virtuales.
+- La primera sincronización marca el punto de partida: no importa todo el historial ni infla la bolsa. Las recompensas se actualizan al ejecutar `pokedex bolsas` o antes de una captura.
+
+El stock inicial es 3 Superbolas, 1 Ultrabola y ninguna Masterbola. Los máximos son 10, 5 y 1 respectivamente. El sistema se basa deliberadamente en confianza local, como el resto de los datos de la Pokédex.
 
 ### Probar solo la animación
 
@@ -57,6 +70,7 @@ Completa subcomandos, formas, resultados de `demo`, nombres de Pokémon reales (
 
 - Base de datos: `~/.local/share/pokedex-cli/pokedex.db` (tablas `captures` y `species_cache`).
 - Último Pokémon visto: `~/.local/share/pokedex-cli/last_seen.json`.
+- Inventario y progreso de actividad: `~/.local/share/pokedex-cli/inventory.json`.
 - Para empezar de cero: `rm ~/.local/share/pokedex-cli/pokedex.db`.
 
 ## Instalación / reinstalación

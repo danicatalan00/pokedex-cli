@@ -3,10 +3,11 @@ import sys
 from datetime import datetime, timezone
 
 from rich.console import Console
+from rich.table import Table
 
 import json
 
-from pokedex_cli import animation, capture, display, krabby_bridge, paths, pokeapi, storage
+from pokedex_cli import animation, capture, display, inventory, krabby_bridge, paths, pokeapi, storage
 
 console = Console()
 _display_name = display.display_name
@@ -67,6 +68,52 @@ def cmd_ver(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_activity_rewards(result: inventory.SyncResult) -> None:
+    for reward in result.rewards:
+        ball = inventory.BALLS[reward.slug]
+        reason = "por el paso del tiempo" if reward.source == "tiempo" else "por tus commits"
+        console.print(f"[green]+{reward.count} {ball.name}[/] {reason}.")
+
+
+def _choose_ball(args: argparse.Namespace, current_inventory: dict) -> inventory.Ball:
+    if args.bola:
+        ball = inventory.resolve_ball(args.bola)
+        if ball is None:
+            valid = ", ".join(inventory.BALLS)
+            raise ValueError(f"Pokébola desconocida: {args.bola}. Opciones: {valid}.")
+        if not ball.unlimited and inventory.stock_count(current_inventory, ball.slug) == 0:
+            raise ValueError(f"No te queda ninguna {ball.name}.")
+        return ball
+
+    available = [inventory.BALLS["pokebola"]]
+    available.extend(
+        ball for slug, ball in inventory.BALLS.items()
+        if slug != "pokebola" and (inventory.stock_count(current_inventory, slug) or 0) > 0
+    )
+    if len(available) == 1:
+        return available[0]
+
+    console.print("¿Qué Pokébola quieres lanzar?")
+    for number, ball in enumerate(available, 1):
+        if ball.unlimited:
+            stock = "∞"
+        else:
+            stock = str(inventory.stock_count(current_inventory, ball.slug))
+        effect = "captura garantizada" if ball.guaranteed else f"{ball.multiplier:g}×"
+        console.print(f"  [{number}] {ball.name:<11} ×{stock:<2}  ({effect})")
+
+    while True:
+        try:
+            answer = input(f"Elige [1-{len(available)}] o Enter para Pokébola: ").strip()
+        except EOFError:
+            answer = ""
+        if not answer:
+            return available[0]
+        if answer.isdigit() and 1 <= int(answer) <= len(available):
+            return available[int(answer) - 1]
+        print("Opción no válida.")
+
+
 def cmd_capturar(args: argparse.Namespace) -> int:
     last_seen = paths.read_last_seen()
     if last_seen is None:
@@ -78,6 +125,14 @@ def cmd_capturar(args: argparse.Namespace) -> int:
 
     species, form, shiny = last_seen["species"], last_seen["form"], last_seen["shiny"]
 
+    activity = inventory.sync_activity()
+    _print_activity_rewards(activity)
+    try:
+        ball = _choose_ball(args, activity.inventory)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/]")
+        return 2
+
     conn = storage.get_connection()
     cache = storage.get_species_cache(conn, species, form)
     if cache is None:
@@ -86,13 +141,24 @@ def cmd_capturar(args: argparse.Namespace) -> int:
             storage.upsert_species_cache(conn, species, form, data, _now_iso())
         cache = storage.get_species_cache(conn, species, form)
 
-    # La captura no está garantizada: se tira el dado según el capture_rate real.
+    # La bola se gasta al lanzarla, acierte o no. La normal es infinita.
+    try:
+        inventory.consume_ball(ball.slug)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/]")
+        return 2
+
+    # La captura no está garantizada: capture_rate real × multiplicador de bola.
     chance = capture.catch_chance(
         cache["capture_rate"] if cache is not None else None,
         is_legendary=bool(cache["is_legendary"]) if cache is not None else False,
         is_mythical=bool(cache["is_mythical"]) if cache is not None else False,
         shiny=shiny,
+        ball_multiplier=ball.multiplier,
     )
+    if args.debug:
+        chance_label = "garantizada" if ball.guaranteed else f"{chance:.1%}"
+        console.print(f"[dim]{ball.name} · probabilidad de captura: {chance_label}[/]")
     caught = capture.roll_capture(chance)
 
     name = _display_name(species, form)
@@ -137,6 +203,47 @@ def cmd_capturar(args: argparse.Namespace) -> int:
             console.print(
                 f"[yellow]{breakout}[/] "
             )
+    return 0
+
+
+def cmd_bolsas(args: argparse.Namespace) -> int:
+    result = inventory.sync_activity(force_repo_scan=True)
+    _print_activity_rewards(result)
+
+    table = Table(title="Bolsa", box=None, pad_edge=False)
+    table.add_column("Pokébola", style="bold")
+    table.add_column("Stock", justify="right")
+    table.add_column("Siguiente", justify="right")
+    for ball in inventory.BALLS.values():
+        count = "∞" if ball.unlimited else str(inventory.stock_count(result.inventory, ball.slug))
+        missing = inventory.commits_until_next(result.inventory, ball.slug)
+        if missing is None:
+            next_reward = "siempre disponible"
+        else:
+            unit = "commit" if missing == 1 else "commits"
+            next_reward = f"faltan {missing} {unit}"
+        table.add_row(ball.name, count, next_reward)
+    console.print(table)
+
+    if args.info:
+        details = Table(title="Información", box=None, pad_edge=False)
+        details.add_column("Pokébola", style="bold")
+        details.add_column("Efecto")
+        details.add_column("Máximo", justify="right")
+        for ball in inventory.BALLS.values():
+            effect = "captura garantizada" if ball.guaranteed else f"captura ×{ball.multiplier:g}"
+            maximum = "∞" if ball.unlimited else str(ball.max_stock)
+            details.add_row(ball.name, effect, maximum)
+        console.print()
+        console.print(details)
+
+        work_commits = result.inventory["activity"]["work_commits"]
+        console.print(
+            f"\n[bold]Actividad[/]\n"
+            f"{work_commits} commits laborales registrados en {result.repositories} repos Git.\n"
+            "Se cuentan commits propios de lunes a viernes, de 08:00 a 19:00.\n"
+            "Además, el taller repone 1 Superbola cada 24 horas."
+        )
     return 0
 
 
@@ -316,7 +423,8 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "Ejemplos:\n"
             "  pokedex ver                     ¿qué Pokémon está esperando?\n"
-            "  pokedex capturar                intenta capturarlo (con suerte)\n"
+            "  pokedex capturar --bola ultra  intenta capturarlo con una Ultrabola\n"
+            "  pokedex bolsas                  consulta y repone tus bolas especiales\n"
             "  pokedex list                    tus capturas\n"
             "  pokedex search charizard -f mega-x     ficha de una forma concreta\n"
             "  pokedex equipo add 3            mete la captura #3 en tu equipo\n"
@@ -346,11 +454,30 @@ def build_parser() -> argparse.ArgumentParser:
 
     capturar_parser = subparsers.add_parser(
         "capturar", help="intenta capturar el Pokémon que está esperando",
-        description="Lanza una Pokébola al Pokémon que está esperando. La captura NO "
-        "está garantizada: se tira el dado según su rareza (capture_rate). Si se "
-        "suelta, sigue esperando y puedes reintentarlo.",
+        description="Elige una Pokébola y lánzala al Pokémon que está esperando. La "
+        "Pokébola normal es infinita; las especiales aumentan la probabilidad y se "
+        "reponen con tiempo y actividad Git. Si se suelta, puedes reintentarlo.",
+    )
+    capturar_parser.add_argument(
+        "-b", "--bola", metavar="BOLA",
+        help="selección directa: poke, super, ultra o master (sin menú)",
+    )
+    capturar_parser.add_argument(
+        "--debug", action="store_true",
+        help="muestra la probabilidad exacta de captura",
     )
     capturar_parser.set_defaults(func=cmd_capturar)
+
+    bolsas_parser = subparsers.add_parser(
+        "bolsas", help="muestra y actualiza tus Pokébolas",
+        description="Muestra el stock. La Pokébola normal es infinita; las especiales "
+        "se reponen con tiempo y commits propios en horario laboral.",
+    )
+    bolsas_parser.add_argument(
+        "--info", action="store_true",
+        help="muestra efectividad, límites y detalles de la reposición",
+    )
+    bolsas_parser.set_defaults(func=cmd_bolsas)
 
     list_parser = subparsers.add_parser(
         "list", help="lista tus capturas",

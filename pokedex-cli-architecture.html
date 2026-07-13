@@ -62,7 +62,7 @@
         <div class="pulse-dot"></div>
         <h1>pokedex-cli — Arquitectura</h1>
       </div>
-      <p class="subtitle">Pokédex de terminal: hook al abrir la shell, captura con RNG y persistencia local en SQLite. Sin servidores.</p>
+      <p class="subtitle">Pokédex de terminal: hook al abrir la shell, captura con RNG, Pokébolas orgánicas y persistencia local. Sin servidores.</p>
     </div>
 
     <!-- Main Diagram -->
@@ -275,11 +275,12 @@
         </ul>
       </div>
       <div class="card">
-        <div class="card-header"><div class="card-dot emerald"></div><h3>Flujo: capturar (con RNG)</h3></div>
+        <div class="card-header"><div class="card-dot emerald"></div><h3>Flujo: capturar (bola + RNG)</h3></div>
         <ul>
           <li>• lee <code>last_seen.json</code> (el que espera)</li>
+          <li>• sincroniza tiempo/commits y permite elegir Pokébola</li>
           <li>• cachea/enriquece vía <code>PokeAPI</code> si hay red</li>
-          <li>• <code>capture.py</code> tira el dado según <code>capture_rate</code></li>
+          <li>• tira el dado: <code>capture_rate × multiplicador</code></li>
           <li>• <code>animation.py</code> lanza la pokébola sobre el sprite real</li>
           <li>• si acierta → <code>INSERT</code> en <code>pokedex.db</code> + N.º Pokédex</li>
         </ul>
@@ -290,6 +291,7 @@
           <li>• <code>pokedex.db</code>: <code>captures</code> + <code>species_cache</code></li>
           <li>• migración idempotente (columna <code>capture_rate</code>)</li>
           <li>• <code>last_seen.json</code>: último Pokémon visto</li>
+          <li>• <code>inventory.json</code>: stock + progreso de actividad Git</li>
           <li>• <code>krabby_pokemon.json</code>: copia de la BD de krabby</li>
           <li>• todo bajo <code>~/.local/share/pokedex-cli</code></li>
         </ul>
@@ -298,7 +300,7 @@
 
     <!-- Footer -->
     <p class="footer">
-      pokedex-cli • CLI local en Python • krabby + PokeAPI + SQLite • sin servidores, sin daemons (hot-reload por invocación)
+      pokedex-cli • CLI local en Python • krabby + Git + PokeAPI + SQLite • sin servidores ni daemons
     </p>
   </div>
 </body>

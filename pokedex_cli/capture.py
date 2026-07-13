@@ -21,15 +21,18 @@ def random_legendary(rng: random.Random | None = None) -> str:
 
 
 def catch_chance(capture_rate: int | None, is_legendary: bool = False,
-                 is_mythical: bool = False, shiny: bool = False) -> float:
+                 is_mythical: bool = False, shiny: bool = False,
+                 ball_multiplier: float = 1.0) -> float:
     """Devuelve la probabilidad de capturar."""
+    if ball_multiplier >= 255:
+        return 1.0
     if capture_rate is None:
         # Sin datos de PokeAPI no hay capture_rate base que aplicar.
         base = 0.55 if (is_legendary or is_mythical) else 0.8
     else:
         # capture_rate va de 3 (legendarios) a 255 (los más fáciles).
         base = capture_rate / 255
-    return max(0.0, min(1.0, base))
+    return max(0.0, min(1.0, base * ball_multiplier))
 
 
 def escape_after_attempts(capture_rate: int | None, speed: int | None = None,

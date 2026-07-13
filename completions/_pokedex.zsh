@@ -27,6 +27,7 @@ _pokedex() {
   commands=(
     'ver:muestra qué Pokémon está esperando'
     'capturar:intenta capturar el Pokémon que espera'
+    'bolsas:muestra y actualiza tus Pokébolas'
     'list:lista tus capturas'
     'search:ficha de cualquier Pokémon o forma'
     'vision:vista enriquecida de un Pokémon capturado (sprite + ficha)'
@@ -49,6 +50,15 @@ _pokedex() {
       ;;
     args)
       case $line[1] in
+        capturar)
+          _arguments \
+            '(-b --bola)'{-b,--bola}'[elige la Pokébola sin menú]:bola:(poke super ultra master)' \
+            '--debug[muestra la probabilidad exacta de captura]'
+          ;;
+        bolsas)
+          _arguments \
+            '--info[muestra efectividad, límites y reglas de reposición]'
+          ;;
         search)
           _arguments \
             '(-f --form)'{-f,--form}'[forma alternativa]:forma:' \

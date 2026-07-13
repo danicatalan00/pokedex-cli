@@ -7,6 +7,7 @@ DATA_DIR = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local/share"
 DB_PATH = DATA_DIR / "pokedex.db"
 LAST_SEEN_PATH = DATA_DIR / "last_seen.json"
 KRABBY_POKEMON_JSON = DATA_DIR / "krabby_pokemon.json"
+INVENTORY_PATH = DATA_DIR / "inventory.json"
 
 
 def ensure_dirs() -> None:
@@ -14,7 +15,7 @@ def ensure_dirs() -> None:
 
 
 def _atomic_write_json(path: Path, data: dict) -> None:
-    ensure_dirs()
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     tmp_path.write_text(json.dumps(data))
     os.replace(tmp_path, path)
