@@ -1,8 +1,8 @@
-"""Inventario de Pokébolas y recompensas por actividad local.
+"""Inventario de Pokeballs y recompensas por actividad local.
 
-La Pokébola normal es deliberadamente infinita: el inventario añade decisiones
+La Pokeball normal es deliberadamente infinita: el inventario añade decisiones
 interesantes a la captura, pero nunca bloquea el bucle principal del programa.
-Las bolas especiales se reponen con el paso del tiempo y con commits propios
+Las Pokeballs especiales se reponen con el paso del tiempo y con commits propios
 hechos en horario laboral en repositorios Git bajo HOME.
 """
 
@@ -35,28 +35,37 @@ class Ball:
 
 
 BALLS = {
-    "pokebola": Ball("pokebola", "Pokébola", 1.0, None),
-    "superbola": Ball("superbola", "Superbola", 1.5, 10),
-    "ultrabola": Ball("ultrabola", "Ultrabola", 2.0, 5),
-    "masterbola": Ball("masterbola", "Masterbola", 255.0, 1),
+    "pokeball": Ball("pokeball", "Pokeball", 1.0, None),
+    "superball": Ball("superball", "Superball", 1.5, 10),
+    "ultraball": Ball("ultraball", "Ultraball", 2.0, 5),
+    "masterball": Ball("masterball", "Masterball", 255.0, 1),
+}
+
+# Slugs antiguos (familia "-bola") que pueden vivir en inventarios/BD guardados.
+# Se remapean al leer para no perder stock ni capturas antiguas.
+LEGACY_BALL_SLUGS = {
+    "pokebola": "pokeball",
+    "superbola": "superball",
+    "ultrabola": "ultraball",
+    "masterbola": "masterball",
 }
 
 BALL_ALIASES = {
-    "poke": "pokebola",
-    "pokeball": "pokebola",
-    "normal": "pokebola",
-    "super": "superbola",
-    "great": "superbola",
-    "ultra": "ultrabola",
-    "master": "masterbola",
+    "poke": "pokeball",
+    "normal": "pokeball",
+    "super": "superball",
+    "great": "superball",
+    "ultra": "ultraball",
+    "master": "masterball",
+    **LEGACY_BALL_SLUGS,
 }
 
-INITIAL_STOCK = {"superbola": 3, "ultrabola": 1, "masterbola": 0}
+INITIAL_STOCK = {"superball": 3, "ultraball": 1, "masterball": 0}
 PASSIVE_INTERVAL = timedelta(hours=24)
 REPO_SCAN_INTERVAL = timedelta(hours=6)
 WORKDAY_START_HOUR = 8
 WORKDAY_END_HOUR = 19
-COMMIT_REWARD_EVERY = {"superbola": 3, "ultrabola": 10, "masterbola": 50}
+COMMIT_REWARD_EVERY = {"superball": 3, "ultraball": 10, "masterball": 50}
 MAX_REMEMBERED_COMMITS = 2000
 
 _SKIP_DIRS = {
@@ -73,11 +82,23 @@ class Reward:
 
 
 @dataclass(frozen=True)
+class WorkCommit:
+    oid: str
+    additions: int
+    deletions: int
+
+    @property
+    def changed_lines(self) -> int:
+        return self.additions + self.deletions
+
+
+@dataclass(frozen=True)
 class SyncResult:
     inventory: dict
     rewards: tuple[Reward, ...]
     new_work_commits: int
     repositories: int
+    commits: tuple[WorkCommit, ...] = ()
 
 
 def _now_utc() -> datetime:
@@ -127,6 +148,12 @@ def _normalise_inventory(data: object, now: datetime) -> dict:
         source_balls = data["balls"]
     else:
         source_balls = data
+    # Migra slugs antiguos ("-bola") de inventarios guardados a la familia "-ball".
+    source_balls = {
+        LEGACY_BALL_SLUGS.get(slug, slug): count
+        for slug, count in source_balls.items()
+        if isinstance(slug, str)
+    }
     for slug in INITIAL_STOCK:
         try:
             base["balls"][slug] = max(0, int(source_balls.get(slug, INITIAL_STOCK[slug])))
@@ -264,8 +291,8 @@ def _is_work_hours(author_date: str) -> bool:
 
 def _new_work_commits(
     repositories: list[Path], since: datetime, already_processed: set[str]
-) -> set[str]:
-    found: set[str] = set()
+) -> dict[str, WorkCommit]:
+    found: dict[str, WorkCommit] = {}
     # El solape cubre commits con la misma marca temporal que el sync anterior.
     git_since = _iso(since - timedelta(minutes=5))
     for repo in repositories:
@@ -274,11 +301,14 @@ def _new_work_commits(
             continue
         output = _git(
             repo, "log", "--all", f"--since={git_since}",
-            "--format=%H%x1f%aI%x1f%ae",
+            "--format=%x1e%H%x1f%aI%x1f%ae", "--numstat",
         )
-        for line in output.splitlines():
+        for block in output.split("\x1e"):
+            lines = block.strip("\n").splitlines()
+            if not lines:
+                continue
             try:
-                commit, author_date, author_email = line.split("\x1f", 2)
+                commit, author_date, author_email = lines[0].split("\x1f", 2)
             except ValueError:
                 continue
             if (
@@ -286,7 +316,18 @@ def _new_work_commits(
                 and author_email.strip().lower() in emails
                 and _is_work_hours(author_date)
             ):
-                found.add(commit)
+                additions = deletions = 0
+                for stat in lines[1:]:
+                    parts = stat.split("\t", 2)
+                    if len(parts) < 2:
+                        continue
+                    # Git representa ficheros binarios como "-\t-"; no hay
+                    # lineas comparables y por eso no inflan la dificultad.
+                    if parts[0].isdigit():
+                        additions += int(parts[0])
+                    if parts[1].isdigit():
+                        deletions += int(parts[1])
+                found[commit] = WorkCommit(commit, additions, deletions)
     return found
 
 
@@ -307,8 +348,8 @@ def _sync_passive(inventory: dict, now: datetime) -> list[Reward]:
     # Se consume todo el tiempo transcurrido aunque la bolsa esté llena: no hay
     # una deuda invisible de bolas esperando a que el usuario gaste una.
     activity["last_passive_at"] = _iso(last + PASSIVE_INTERVAL * intervals)
-    granted = _add_stock(inventory, "superbola", intervals)
-    return [Reward("superbola", granted, "tiempo")] if granted else []
+    granted = _add_stock(inventory, "superball", intervals)
+    return [Reward("superball", granted, "tiempo")] if granted else []
 
 
 def _sync_commit_rewards(inventory: dict, new_commits: int) -> list[Reward]:
@@ -356,11 +397,14 @@ def sync_activity(
     candidates = _new_work_commits(repo_paths, last_synced, processed)
     # En el primer uso se memorizan los commits dentro del pequeño solape, pero
     # no se premian. Así tampoco reaparecen en la segunda sincronización.
-    commits = set() if first_sync else candidates
+    commits = {} if first_sync else candidates
     rewards.extend(_sync_commit_rewards(inventory, len(commits)))
     activity["processed_commits"] = (
         processed_list + sorted(candidates)
     )[-MAX_REMEMBERED_COMMITS:]
     activity["last_synced_at"] = _iso(current)
     save_inventory(inventory, path)
-    return SyncResult(inventory, tuple(rewards), len(commits), len(repo_paths))
+    commit_details = tuple(commits[oid] for oid in sorted(commits))
+    return SyncResult(
+        inventory, tuple(rewards), len(commits), len(repo_paths), commit_details
+    )

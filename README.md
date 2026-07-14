@@ -13,8 +13,10 @@ Nace de `chat-pokedex-cli.txt`, una conversación de chat donde surgió la idea.
   - Si algo falla (`krabby` desinstalado, caché de datos ausente, etc.), cae de vuelta al `krabby random` de siempre — la terminal nunca se rompe.
 - `pokedex capturar` intenta guardar ese último Pokémon (con su forma y si es shiny) en SQLite, con una animación de pokeball que se lanza **sobre el sprite real** del Pokémon (lo absorbe, bambolea y hace click), y lo enriquece con PokeAPI si hay red. No captura nada automáticamente: hay que pedirlo.
   - **La captura no está garantizada.** Se tira el dado según el `capture_rate` real del Pokémon y la bola elegida. Si se suelta, puede seguir esperando unos intentos más o huir definitivamente.
-  - La Pokébola normal (1×) es infinita. Superbola (1,5×), Ultrabola (2×) y Masterbola (captura garantizada) tienen stock y se gastan al lanzarlas.
+  - La Pokeball normal (1×) es infinita. Superball (1,5×), Ultraball (2×) y Masterball (captura garantizada) tienen stock y se gastan al lanzarlas.
+  - Cada modelo tiene su propia animación: patrón, color, estela, impacto, absorción y cierre crecen en intensidad con la calidad de la bola.
   - Al capturar se muestra su **N.º de Pokédex oficial** (p.ej. `#257`) además del orden de captura interno (`captura #1`).
+  - La bola usada queda guardada con la captura y aparece en `pokedex vision`.
 
 ## Comandos
 
@@ -25,24 +27,35 @@ Nace de `chat-pokedex-cli.txt`, una conversación de chat donde surgió la idea.
 | `pokedex bolsas [--info]` | Muestra stock y progreso; `--info` añade reglas y diagnóstico |
 | `pokedex list` | Lista tus capturas |
 | `pokedex search <nombre> [-f forma]` | Ficha de cualquier Pokémon/forma (ej. `pokedex search charizard -f mega-x`) |
+| `pokedex vision <id>` | Vista enriquecida de una captura, incluida la bola utilizada |
 | `pokedex equipo` | Muestra tu equipo (hasta 6) |
-| `pokedex equipo add <id>` / `remove <id>` | Añade/quita una captura del equipo |
+| `pokedex equipo add [id]` / `remove <id>` | Añade con selector (↑/↓ y Enter) o por id; quita por id |
+| `pokedex demo-evolucion [origen] [destino]` | Prueba una evolución sin guardar nada |
 | `pokedex tipos` | Desglose de tus capturas por tipo |
 | `pokedex ranking` | Ranking por suma de stats base, con medallas |
 | `pokedex legendarios` | Salón de la fama de legendarios/singulares capturados |
 | `pokedex demo [nombre]` | Prueba la animación de captura **sin guardar nada** (Pokémon al azar si no se indica) |
 | `pokedex completion zsh` | Imprime el script de autocompletado para zsh |
 
-### Cómo crecen las Pokébolas
+### Cómo crecen las Pokeballs
 
-No hay tienda ni moneda. La Pokébola normal siempre está disponible y las bolas especiales crecen con actividad local:
+No hay tienda ni moneda. La Pokeball normal siempre está disponible y las Pokeballs especiales crecen con actividad local:
 
-- El taller fabrica 1 Superbola cada 24 horas, hasta un máximo de 10.
-- Cada 3 commits laborales registrados concede 1 Superbola; cada 10, 1 Ultrabola; cada 50, 1 Masterbola.
+- El taller fabrica 1 Superball cada 24 horas, hasta un máximo de 10.
+- Cada 3 commits laborales registrados concede 1 Superball; cada 10, 1 Ultraball; cada 50, 1 Masterball.
 - Se consideran commits propios (según `git config user.email`) cuya fecha de autor sea de lunes a viernes entre las 08:00 y las 19:00. Se buscan automáticamente repositorios Git bajo `HOME`; se omiten cachés, dependencias y entornos virtuales.
 - La primera sincronización marca el punto de partida: no importa todo el historial ni infla la bolsa. Las recompensas se actualizan al ejecutar `pokedex bolsas` o antes de una captura.
 
-El stock inicial es 3 Superbolas, 1 Ultrabola y ninguna Masterbola. Los máximos son 10, 5 y 1 respectivamente. El sistema se basa deliberadamente en confianza local, como el resto de los datos de la Pokédex.
+El stock inicial es 3 Superballs, 1 Ultraball y ninguna Masterball. Los máximos son 10, 5 y 1 respectivamente. El sistema se basa deliberadamente en confianza local, como el resto de los datos de la Pokédex.
+
+### Niveles, experiencia y evolución
+
+- Todos los Pokémon se capturan en el nivel 5. Solo entrenan los que están en el equipo.
+- Cada commit laboral nuevo se asigna al azar a uno de ellos. Si quieres entrenar uno concreto, deja solo ese en el equipo.
+- Un commit simula un combate individual de primera generación contra un rival equivalente: `EXP base = experiencia base × nivel / 7`. Su dificultad crece con el diff: `× min(50, 1 + (líneas añadidas + borradas) / 50)`. Los binarios no cuentan líneas y el multiplicador queda limitado a 50×.
+- El nivel usa la curva real de crecimiento de la especie publicada por PokeAPI, con límite 100.
+- Al alcanzar una evolución disparada por nivel queda pendiente. En la siguiente terminal, en lugar del Pokémon salvaje, aparece la secuencia de evolución. Si varios estaban pendientes, evolucionan consecutivamente en esa misma apertura. Conservan id, shiny, nivel, experiencia y puesto en el equipo.
+- Las evoluciones por piedra, intercambio, amistad u otra condición no se convierten artificialmente en evoluciones por nivel. Si hay ramas de nivel simultáneas, el resultado se elige al azar.
 
 ### Probar solo la animación
 
@@ -51,6 +64,11 @@ pokedex demo               # Pokémon al azar, resultado al azar
 pokedex demo -L            # contra un legendario/singular al azar
 pokedex demo pikachu -r catch   # Pokémon y resultado concretos
 pokedex demo -r escape -s   # fuerza fuga, variante shiny
+pokedex demo mewtwo -b master -r catch  # prueba la animación de Masterball
+pokedex demo-evolucion bulbasaur ivysaur       # ritmo normal
+pokedex demo-evolucion charmander charmeleon --speed 0.7  # más rápida
+pokedex demo-evolucion gastly haunter --speed 1.4          # más suspense
+pokedex demo-evolucion magikarp gyarados -s                # shiny
 ```
 
 `demo` no toca la base de datos ni el Pokémon que está esperando: es seguro para trastear.

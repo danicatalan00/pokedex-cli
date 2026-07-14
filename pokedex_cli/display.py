@@ -1,5 +1,7 @@
 import json
 
+from pokedex_cli import progression
+
 from rich import box
 from rich.console import Console, Group
 from rich.panel import Panel
@@ -29,6 +31,13 @@ TYPE_COLORS = {
     "fairy": "pink1",
 }
 
+BALL_LABELS = {
+    "pokeball": ("Pokeball", "red3"),
+    "superball": ("Superball", "dodger_blue1"),
+    "ultraball": ("Ultraball", "gold1"),
+    "masterball": ("Masterball", "magenta"),
+}
+
 
 def display_name(species: str, form: str) -> str:
     label = species.replace("-", " ").title()
@@ -53,6 +62,7 @@ def render_list_table(console: Console, rows: list[dict]) -> None:
     table.add_column("#", justify="right")
     table.add_column("Nº Pokédex", justify="right")
     table.add_column("Pokémon")
+    table.add_column("Nivel", justify="right")
     table.add_column("Tipos")
     table.add_column("Shiny", justify="center")
     table.add_column("Equipo", justify="center")
@@ -65,6 +75,7 @@ def render_list_table(console: Console, rows: list[dict]) -> None:
             str(row["id"]),
             dex,
             name,
+            str(row["level"]),
             types,
             "✨" if row["shiny"] else "",
             "⭐" if row["in_team"] else "",
@@ -209,9 +220,23 @@ def render_vision_card(console: Console, row: dict, sprite: str | None) -> None:
     # --- Pie: datos de la captura ------------------------------------------
     gen = GEN_ROMAN.get(row.get("generation") or "", None)
     foot = Text()
+    level = int(row.get("level") or progression.STARTING_LEVEL)
+    foot.append(f"Nv. {level}", style=f"bold {accent}")
+    growth = row.get("growth_rate") or "medium"
+    if level < progression.MAX_LEVEL:
+        floor = progression.experience_for_level(growth, level)
+        ceiling = progression.experience_for_level(growth, level + 1)
+        current = max(floor, int(row.get("experience") or 0))
+        foot.append(f"  ·  EXP {current - floor}/{ceiling - floor}   ·   ", style="grey54")
+    else:
+        foot.append("  ·  EXP MAX   ·   ", style="gold3")
     foot.append("Capturado: ", style="grey54")
     foot.append(row["caught_at"][:10], style="grey85")
     foot.append(f"   ·   captura #{row['id']}", style="grey54")
+    slug = (row.get("ball_slug") or "pokeball").replace("bola", "ball")
+    ball_name, ball_color = BALL_LABELS.get(slug, BALL_LABELS["pokeball"])
+    foot.append("   ·   ◉ ", style="grey54")
+    foot.append(ball_name, style=f"bold {ball_color}")
     if gen:
         foot.append(f"   ·   Gen {gen}", style="grey54")
     if row["in_team"]:
@@ -260,6 +285,7 @@ def render_team_panel(console: Console, rows: list[dict]) -> None:
     table = Table(box=box.SIMPLE)
     table.add_column("ID", justify="right")
     table.add_column("Pokémon")
+    table.add_column("Nivel", justify="right")
     table.add_column("Tipos")
     if not rows:
         console.print("Tu equipo está vacío. Añade con `pokedex equipo add <id>` (máx. 6).")
@@ -267,7 +293,7 @@ def render_team_panel(console: Console, rows: list[dict]) -> None:
     for row in rows:
         name = display_name(row["species"], row["form"])
         types = type_badges(row["types"]) if row["types"] else "?"
-        table.add_row(str(row["id"]), name, types)
+        table.add_row(str(row["id"]), name, str(row["level"]), types)
     console.print(hall_of_fame_panel("Tu equipo", table))
 
 

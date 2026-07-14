@@ -62,7 +62,7 @@
         <div class="pulse-dot"></div>
         <h1>pokedex-cli — Arquitectura</h1>
       </div>
-      <p class="subtitle">Pokédex de terminal: hook al abrir la shell, captura con RNG, Pokébolas orgánicas y persistencia local. Sin servidores.</p>
+      <p class="subtitle">Pokédex de terminal: hook al abrir la shell, captura con RNG, Pokeballs orgánicas y persistencia local. Sin servidores.</p>
     </div>
 
     <!-- Main Diagram -->
@@ -173,7 +173,7 @@
         <rect x="422" y="162" width="170" height="60" rx="6" fill="#0f172a"/>
         <rect x="422" y="162" width="170" height="60" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
         <text x="507" y="186" fill="white" font-size="11" font-weight="600" text-anchor="middle">animation.py</text>
-        <text x="507" y="202" fill="#94a3b8" font-size="8" text-anchor="middle">pokébola sobre el sprite ANSI</text>
+        <text x="507" y="202" fill="#94a3b8" font-size="8" text-anchor="middle">pokeball sobre el sprite ANSI</text>
         <text x="507" y="214" fill="#94a3b8" font-size="8" text-anchor="middle">absorción · bamboleo · éxito/fuga</text>
 
         <rect x="422" y="248" width="170" height="56" rx="6" fill="#0f172a"/>
@@ -278,18 +278,18 @@
         <div class="card-header"><div class="card-dot emerald"></div><h3>Flujo: capturar (bola + RNG)</h3></div>
         <ul>
           <li>• lee <code>last_seen.json</code> (el que espera)</li>
-          <li>• sincroniza tiempo/commits y permite elegir Pokébola</li>
+          <li>• sincroniza tiempo/commits y permite elegir Pokeball</li>
           <li>• cachea/enriquece vía <code>PokeAPI</code> si hay red</li>
           <li>• tira el dado: <code>capture_rate × multiplicador</code></li>
-          <li>• <code>animation.py</code> lanza la pokébola sobre el sprite real</li>
+          <li>• <code>animation.py</code> lanza la pokeball sobre el sprite real</li>
           <li>• si acierta → <code>INSERT</code> en <code>pokedex.db</code> + N.º Pokédex</li>
         </ul>
       </div>
       <div class="card">
         <div class="card-header"><div class="card-dot violet"></div><h3>Datos y persistencia</h3></div>
         <ul>
-          <li>• <code>pokedex.db</code>: <code>captures</code> + <code>species_cache</code></li>
-          <li>• migración idempotente (columna <code>capture_rate</code>)</li>
+          <li>• <code>pokedex.db</code>: capturas (incluida su bola) + caché de especies</li>
+          <li>• migraciones idempotentes (<code>capture_rate</code> y bola usada)</li>
           <li>• <code>last_seen.json</code>: último Pokémon visto</li>
           <li>• <code>inventory.json</code>: stock + progreso de actividad Git</li>
           <li>• <code>krabby_pokemon.json</code>: copia de la BD de krabby</li>

@@ -10,8 +10,13 @@ CREATE TABLE IF NOT EXISTS captures (
     form TEXT NOT NULL DEFAULT 'regular',
     shiny INTEGER NOT NULL DEFAULT 0,
     caught_at TEXT NOT NULL,
+    ball_slug TEXT NOT NULL DEFAULT 'pokeball',
     nickname TEXT,
-    in_team INTEGER NOT NULL DEFAULT 0
+    in_team INTEGER NOT NULL DEFAULT 0,
+    level INTEGER NOT NULL DEFAULT 5,
+    experience INTEGER NOT NULL DEFAULT 0,
+    pending_evolution_species TEXT,
+    pending_evolution_form TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_captures_species ON captures(species);
 
@@ -32,6 +37,9 @@ CREATE TABLE IF NOT EXISTS species_cache (
     generation TEXT,
     flavor_text TEXT,
     form_data_exact INTEGER NOT NULL DEFAULT 1,
+    growth_rate TEXT,
+    base_experience INTEGER,
+    level_evolutions TEXT NOT NULL DEFAULT '[]',
     fetched_at TEXT NOT NULL,
     PRIMARY KEY (species, form)
 );
@@ -49,16 +57,63 @@ def get_connection() -> sqlite3.Connection:
 
 def _migrate(conn) -> None:
     """Añade columnas nuevas a bases de datos ya existentes (idempotente)."""
-    cols = {r["name"] for r in conn.execute("PRAGMA table_info(species_cache)")}
-    if "capture_rate" not in cols:
+    changed = False
+    cache_cols = {r["name"] for r in conn.execute("PRAGMA table_info(species_cache)")}
+    if "capture_rate" not in cache_cols:
         conn.execute("ALTER TABLE species_cache ADD COLUMN capture_rate INTEGER")
-        conn.commit()
+        changed = True
+    capture_cols = {r["name"] for r in conn.execute("PRAGMA table_info(captures)")}
+    if "ball_slug" not in capture_cols:
+        conn.execute(
+            "ALTER TABLE captures ADD COLUMN ball_slug TEXT NOT NULL DEFAULT 'pokeball'"
+        )
+        changed = True
+    capture_additions = {
+        "level": "INTEGER NOT NULL DEFAULT 5",
+        "experience": "INTEGER NOT NULL DEFAULT 0",
+        "pending_evolution_species": "TEXT",
+        "pending_evolution_form": "TEXT",
+    }
+    for column, declaration in capture_additions.items():
+        if column not in capture_cols:
+            conn.execute(f"ALTER TABLE captures ADD COLUMN {column} {declaration}")
+            changed = True
+    cache_additions = {
+        "growth_rate": "TEXT",
+        "base_experience": "INTEGER",
+        "level_evolutions": "TEXT NOT NULL DEFAULT '[]'",
+    }
+    for column, declaration in cache_additions.items():
+        if column not in cache_cols:
+            conn.execute(f"ALTER TABLE species_cache ADD COLUMN {column} {declaration}")
+            changed = True
+    # Renombra los slugs antiguos de la familia "-bola" a la nueva "-ball".
+    legacy_slugs = {
+        "pokebola": "pokeball",
+        "superbola": "superball",
+        "ultrabola": "ultraball",
+        "masterbola": "masterball",
+    }
+    for old_slug, new_slug in legacy_slugs.items():
+        cur = conn.execute(
+            "UPDATE captures SET ball_slug = ? WHERE ball_slug = ?", (new_slug, old_slug)
+        )
+        if cur.rowcount:
+            changed = True
+    # Los UPDATE de compatibilidad abren una transaccion incluso cuando no
+    # encuentran filas. Hay que cerrarla siempre: el hook mantiene una conexion
+    # mientras sincroniza actividad mediante otra y, de lo contrario, SQLite
+    # deja la base bloqueada.
+    conn.commit()
 
 
-def insert_capture(conn, species: str, form: str, shiny: bool, caught_at: str) -> int:
+def insert_capture(conn, species: str, form: str, shiny: bool, caught_at: str,
+                   ball_slug: str = "pokeball", experience: int = 0) -> int:
     cur = conn.execute(
-        "INSERT INTO captures (species, form, shiny, caught_at) VALUES (?, ?, ?, ?)",
-        (species, form, int(shiny), caught_at),
+        "INSERT INTO captures "
+        "(species, form, shiny, caught_at, ball_slug, level, experience) "
+        "VALUES (?, ?, ?, ?, ?, 5, ?)",
+        (species, form, int(shiny), caught_at, ball_slug, experience),
     )
     conn.commit()
     return cur.lastrowid
@@ -82,6 +137,29 @@ def count_team(conn) -> int:
     return row["n"]
 
 
+def get_pending_evolution(conn) -> sqlite3.Row | None:
+    rows = list_pending_evolutions(conn)
+    return rows[0] if rows else None
+
+
+def list_pending_evolutions(conn) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM captures WHERE pending_evolution_species IS NOT NULL "
+        "ORDER BY id"
+    ).fetchall()
+
+
+def complete_evolution(conn, capture_id: int) -> None:
+    conn.execute(
+        "UPDATE captures SET species = pending_evolution_species, "
+        "form = COALESCE(pending_evolution_form, 'regular'), "
+        "pending_evolution_species = NULL, pending_evolution_form = NULL "
+        "WHERE id = ? AND pending_evolution_species IS NOT NULL",
+        (capture_id,),
+    )
+    conn.commit()
+
+
 def get_species_cache(conn, species: str, form: str) -> sqlite3.Row | None:
     return conn.execute(
         "SELECT * FROM species_cache WHERE species = ? AND form = ?", (species, form)
@@ -93,8 +171,9 @@ def upsert_species_cache(conn, species: str, form: str, data: dict, fetched_at: 
         """
         INSERT INTO species_cache
             (species, form, pokedex_id, capture_rate, types, hp, atk, def, spa, spd, spe,
-             is_legendary, is_mythical, generation, flavor_text, form_data_exact, fetched_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             is_legendary, is_mythical, generation, flavor_text, form_data_exact,
+             growth_rate, base_experience, level_evolutions, fetched_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(species, form) DO UPDATE SET
             pokedex_id=excluded.pokedex_id, capture_rate=excluded.capture_rate,
             types=excluded.types,
@@ -103,6 +182,9 @@ def upsert_species_cache(conn, species: str, form: str, data: dict, fetched_at: 
             is_legendary=excluded.is_legendary, is_mythical=excluded.is_mythical,
             generation=excluded.generation, flavor_text=excluded.flavor_text,
             form_data_exact=excluded.form_data_exact, fetched_at=excluded.fetched_at
+            , growth_rate=excluded.growth_rate,
+            base_experience=excluded.base_experience,
+            level_evolutions=excluded.level_evolutions
         """,
         (
             species,
@@ -121,6 +203,9 @@ def upsert_species_cache(conn, species: str, form: str, data: dict, fetched_at: 
             data.get("generation"),
             data.get("flavor_text"),
             int(data.get("form_data_exact", True)),
+            data.get("growth_rate"),
+            data.get("base_experience"),
+            json.dumps(data.get("level_evolutions", [])),
             fetched_at,
         ),
     )

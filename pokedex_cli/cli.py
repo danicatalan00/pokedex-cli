@@ -1,13 +1,21 @@
 import argparse
+import os
+import select
 import sys
+import termios
+import tty
 from datetime import datetime, timezone
 
 from rich.console import Console
+from rich.live import Live
 from rich.table import Table
 
 import json
 
-from pokedex_cli import animation, capture, display, inventory, krabby_bridge, paths, pokeapi, storage
+from pokedex_cli import (
+    animation, capture, display, inventory, krabby_bridge, paths, pokeapi,
+    progression, storage,
+)
 
 console = Console()
 _display_name = display.display_name
@@ -35,6 +43,8 @@ def _row_with_cache(conn, capture_row) -> dict:
         row["flavor_text"] = cache["flavor_text"]
         row["capture_rate"] = cache["capture_rate"]
         row["form_data_exact"] = cache["form_data_exact"]
+        row["growth_rate"] = cache["growth_rate"]
+        row["base_experience"] = cache["base_experience"]
     else:
         row["types"] = None
         row["is_legendary"] = 0
@@ -44,13 +54,69 @@ def _row_with_cache(conn, capture_row) -> dict:
         row["flavor_text"] = None
         row["capture_rate"] = None
         row["form_data_exact"] = 1
+        row["growth_rate"] = "medium"
+        row["base_experience"] = progression.DEFAULT_BASE_EXPERIENCE
     return row
+
+
+def _print_training(results: tuple[progression.TrainingResult, ...]) -> None:
+    for result in results:
+        name = _display_name(result.species, "regular")
+        message = f"[cyan]{name}[/] gana [bold]+{result.experience} EXP[/]"
+        if result.changed_lines:
+            message += f" [dim]({result.changed_lines} líneas cambiadas)[/]"
+        if result.new_level > result.old_level:
+            message += f" · [bold yellow]¡sube al nivel {result.new_level}![/]"
+        console.print(message)
+
+
+def _sync_training(*, force_repo_scan: bool = False):
+    result = inventory.sync_activity(force_repo_scan=force_repo_scan)
+    conn = storage.get_connection()
+    # Bases anteriores a la progresion ya tienen ficha, pero no los campos de
+    # crecimiento/evolucion. Se enriquecen una sola vez y se conserva fallback
+    # offline si PokeAPI no esta disponible.
+    for member in conn.execute("SELECT * FROM captures WHERE in_team = 1").fetchall():
+        cache = storage.get_species_cache(conn, member["species"], member["form"])
+        if cache is None or not cache["growth_rate"]:
+            data = pokeapi.fetch_species_data(member["species"], member["form"])
+            if data is not None:
+                storage.upsert_species_cache(
+                    conn, member["species"], member["form"], data, _now_iso()
+                )
+    workload = result.commits if result.commits else result.new_work_commits
+    training = progression.apply_commit_experience(conn, workload)
+    return result, training
 
 
 def cmd_hook(args: argparse.Namespace) -> int:
     def write_last_seen(species: str, form: str, shiny: bool) -> None:
         paths.write_last_seen(species, form, shiny, _now_iso())
 
+    conn = storage.get_connection()
+    # Una evolucion ya pendiente pertenece a la apertura anterior. La actividad
+    # nueva se sincroniza ahora, pero cualquier nueva evolucion esperara a la
+    # proxima terminal tal como en el bucle del juego.
+    pending = storage.list_pending_evolutions(conn)
+    _, training = _sync_training()
+    _print_training(training)
+    if pending:
+        for pokemon in pending:
+            target_species = pokemon["pending_evolution_species"]
+            target_form = pokemon["pending_evolution_form"] or "regular"
+            data = pokeapi.fetch_species_data(target_species, target_form)
+            if data is not None:
+                storage.upsert_species_cache(
+                    conn, target_species, target_form, data, _now_iso()
+                )
+            animation.play_evolution_animation(
+                console, pokemon["species"], pokemon["form"], target_species,
+                target_form, bool(pokemon["shiny"]),
+            )
+            storage.complete_evolution(conn, pokemon["id"])
+            progression.queue_current_evolution(conn, pokemon["id"])
+        paths.clear_last_seen()
+        return 0
     krabby_bridge.run_hook(args.generations, write_last_seen)
     return 0
 
@@ -80,20 +146,20 @@ def _choose_ball(args: argparse.Namespace, current_inventory: dict) -> inventory
         ball = inventory.resolve_ball(args.bola)
         if ball is None:
             valid = ", ".join(inventory.BALLS)
-            raise ValueError(f"Pokébola desconocida: {args.bola}. Opciones: {valid}.")
+            raise ValueError(f"Pokeball desconocida: {args.bola}. Opciones: {valid}.")
         if not ball.unlimited and inventory.stock_count(current_inventory, ball.slug) == 0:
             raise ValueError(f"No te queda ninguna {ball.name}.")
         return ball
 
-    available = [inventory.BALLS["pokebola"]]
+    available = [inventory.BALLS["pokeball"]]
     available.extend(
         ball for slug, ball in inventory.BALLS.items()
-        if slug != "pokebola" and (inventory.stock_count(current_inventory, slug) or 0) > 0
+        if slug != "pokeball" and (inventory.stock_count(current_inventory, slug) or 0) > 0
     )
     if len(available) == 1:
         return available[0]
 
-    console.print("¿Qué Pokébola quieres lanzar?")
+    console.print("¿Qué Pokeball quieres lanzar?")
     for number, ball in enumerate(available, 1):
         if ball.unlimited:
             stock = "∞"
@@ -104,7 +170,7 @@ def _choose_ball(args: argparse.Namespace, current_inventory: dict) -> inventory
 
     while True:
         try:
-            answer = input(f"Elige [1-{len(available)}] o Enter para Pokébola: ").strip()
+            answer = input(f"Elige [1-{len(available)}] o Enter para Pokeball: ").strip()
         except EOFError:
             answer = ""
         if not answer:
@@ -125,8 +191,9 @@ def cmd_capturar(args: argparse.Namespace) -> int:
 
     species, form, shiny = last_seen["species"], last_seen["form"], last_seen["shiny"]
 
-    activity = inventory.sync_activity()
+    activity, training = _sync_training()
     _print_activity_rewards(activity)
+    _print_training(training)
     try:
         ball = _choose_ball(args, activity.inventory)
     except ValueError as exc:
@@ -166,7 +233,18 @@ def cmd_capturar(args: argparse.Namespace) -> int:
         name += " ✨shiny✨"
 
     if caught:
-        capture_id = storage.insert_capture(conn, species, form, shiny, _now_iso())
+        capture_id = storage.insert_capture(
+            conn, species, form, shiny, _now_iso(), ball.slug,
+            experience=progression.experience_for_level(
+                (
+                    cache.get("growth_rate", "medium")
+                    if isinstance(cache, dict)
+                    else (cache["growth_rate"] or "medium") if cache is not None
+                    else "medium"
+                ),
+                progression.STARTING_LEVEL,
+            ),
+        )
         paths.mark_last_seen_captured()
         fled = False
         attempts = escape_after = 0
@@ -183,7 +261,9 @@ def cmd_capturar(args: argparse.Namespace) -> int:
         if fled:
             paths.clear_last_seen()
 
-    animation.play_capture_animation(console, species, form, shiny, caught)
+    animation.play_capture_animation(
+        console, species, form, shiny, caught, ball_slug=ball.slug
+    )
 
     if caught:
         pokedex_id = cache["pokedex_id"] if cache is not None else None
@@ -207,11 +287,12 @@ def cmd_capturar(args: argparse.Namespace) -> int:
 
 
 def cmd_bolsas(args: argparse.Namespace) -> int:
-    result = inventory.sync_activity(force_repo_scan=True)
+    result, training = _sync_training(force_repo_scan=True)
     _print_activity_rewards(result)
+    _print_training(training)
 
     table = Table(title="Bolsa", box=None, pad_edge=False)
-    table.add_column("Pokébola", style="bold")
+    table.add_column("Pokeball", style="bold")
     table.add_column("Stock", justify="right")
     table.add_column("Siguiente", justify="right")
     for ball in inventory.BALLS.values():
@@ -227,7 +308,7 @@ def cmd_bolsas(args: argparse.Namespace) -> int:
 
     if args.info:
         details = Table(title="Información", box=None, pad_edge=False)
-        details.add_column("Pokébola", style="bold")
+        details.add_column("Pokeball", style="bold")
         details.add_column("Efecto")
         details.add_column("Máximo", justify="right")
         for ball in inventory.BALLS.values():
@@ -242,7 +323,7 @@ def cmd_bolsas(args: argparse.Namespace) -> int:
             f"\n[bold]Actividad[/]\n"
             f"{work_commits} commits laborales registrados en {result.repositories} repos Git.\n"
             "Se cuentan commits propios de lunes a viernes, de 08:00 a 19:00.\n"
-            "Además, el taller repone 1 Superbola cada 24 horas."
+            "Además, el taller repone 1 Superball cada 24 horas."
         )
     return 0
 
@@ -280,6 +361,101 @@ def _resolve_capture(conn, ident: str, form: str | None):
     return None
 
 
+def _read_menu_key() -> str:
+    """Lee una tecla sin requerir Enter y normaliza flechas/vi/escape."""
+    fd = sys.stdin.fileno()
+    previous = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        key = os.read(fd, 1).decode(errors="ignore")
+        if key == "\x1b":
+            # Una flecha llega como ESC + "[" + letra. Los tres bytes pueden
+            # atravesar el PTY en paquetes distintos, por eso damos a cada uno
+            # un margen breve antes de tratar ESC como cancelacion aislada.
+            for _ in range(2):
+                if not select.select([sys.stdin], [], [], 0.1)[0]:
+                    break
+                key += os.read(fd, 1).decode(errors="ignore")
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, previous)
+    return {
+        "\x1b[A": "up", "k": "up", "K": "up",
+        "\x1b[B": "down", "j": "down", "J": "down",
+        "\r": "enter", "\n": "enter",
+        "q": "cancel", "Q": "cancel", "\x1b": "cancel",
+    }.get(key, "other")
+
+
+def _team_picker_table(rows: list[dict], selected: int, window_size: int = 10) -> Table:
+    start = max(0, min(selected - window_size // 2, len(rows) - window_size))
+    visible = rows[start:start + window_size]
+    table = Table(
+        title="Elige un Pokémon · ↑/↓ mover · Enter añadir · q cancelar",
+        box=None,
+    )
+    table.add_column("", width=2)
+    table.add_column("ID", justify="right")
+    table.add_column("Pokémon")
+    table.add_column("Nivel", justify="right")
+    table.add_column("Tipos")
+    for offset, row in enumerate(visible):
+        index = start + offset
+        style = "bold reverse cyan" if index == selected else None
+        name = _display_name(row["species"], row["form"])
+        if row["shiny"]:
+            name += " ✨"
+        table.add_row(
+            "▶" if index == selected else "",
+            str(row["id"]),
+            name,
+            str(row["level"]),
+            display.type_badges(row["types"]) if row["types"] else "?",
+            style=style,
+        )
+    if len(rows) > window_size:
+        table.caption = f"{selected + 1}/{len(rows)}"
+    return table
+
+
+def _select_capture_for_team(conn) -> int | None:
+    rows = [
+        _row_with_cache(conn, row)
+        for row in storage.list_captures(conn)
+        if not row["in_team"]
+    ]
+    if not rows:
+        console.print("No tienes más Pokémon fuera del equipo para añadir.")
+        return None
+
+    # Si stdin no es interactivo (script/pipe), conserva una alternativa que
+    # no depende de secuencias ANSI ni modo raw.
+    if not sys.stdin.isatty():
+        display.render_list_table(console, rows)
+        try:
+            answer = input("ID para añadir (vacío cancela): ").strip()
+        except EOFError:
+            return None
+        valid = {str(row["id"]): row["id"] for row in rows}
+        return valid.get(answer)
+
+    selected = 0
+    with Live(
+        _team_picker_table(rows, selected), console=console,
+        auto_refresh=False, transient=True,
+    ) as live:
+        while True:
+            key = _read_menu_key()
+            if key == "up":
+                selected = (selected - 1) % len(rows)
+            elif key == "down":
+                selected = (selected + 1) % len(rows)
+            elif key == "enter":
+                return int(rows[selected]["id"])
+            elif key == "cancel":
+                return None
+            live.update(_team_picker_table(rows, selected), refresh=True)
+
+
 def cmd_vision(args: argparse.Namespace) -> int:
     """Vista enriquecida de un Pokémon que YA has capturado: sprite de krabby
     + ficha completa de PokeAPI."""
@@ -308,18 +484,25 @@ def cmd_vision(args: argparse.Namespace) -> int:
 
 def cmd_equipo(args: argparse.Namespace) -> int:
     conn = storage.get_connection()
-    if args.accion in ("add", "remove") and args.id is None:
-        print(f"Uso: pokedex equipo {args.accion} <id>")
+    if args.accion == "remove" and args.id is None:
+        print("Uso: pokedex equipo remove <id>")
         return 1
     if args.accion == "add":
         if storage.count_team(conn) >= 6:
             print("Tu equipo ya tiene 6 Pokémon. Quita uno con `pokedex equipo remove <id>`.")
             return 1
-        if storage.get_capture(conn, args.id) is None:
-            print(f"No existe ninguna captura con id {args.id}.")
+        capture_id = args.id if args.id is not None else _select_capture_for_team(conn)
+        if capture_id is None:
+            return 0
+        selected = storage.get_capture(conn, capture_id)
+        if selected is None:
+            print(f"No existe ninguna captura con id {capture_id}.")
             return 1
-        storage.set_team(conn, args.id, True)
-        print(f"Añadido al equipo (#{args.id}).")
+        if selected["in_team"]:
+            print(f"La captura #{capture_id} ya está en el equipo.")
+            return 0
+        storage.set_team(conn, capture_id, True)
+        print(f"Añadido al equipo (#{capture_id}).")
         return 0
     if args.accion == "remove":
         storage.set_team(conn, args.id, False)
@@ -378,24 +561,37 @@ def cmd_demo(args: argparse.Namespace) -> int:
         if args.shiny:
             shiny = True
 
+    ball = inventory.resolve_ball(args.bola) or inventory.BALLS["pokeball"]
+
     if args.result == "catch":
         caught = True
     elif args.result == "escape":
         caught = False
     else:
-        caught = capture.roll_capture(0.6)
+        caught = True if ball.guaranteed else capture.roll_capture(0.6)
 
     name = _display_name(species, form)
     if shiny:
         name += " ✨shiny✨"
     console.print(
-        f"[dim]· demo ·[/] lanzando Pokébola a [bold]{name}[/] "
+        f"[dim]· demo ·[/] lanzando {ball.name} a [bold]{name}[/] "
         f"→ resultado: {'captura' if caught else 'fuga'} "
         "[dim](no se guarda nada)[/]"
     )
-    animation.play_capture_animation(console, species, form, shiny, caught)
+    animation.play_capture_animation(
+        console, species, form, shiny, caught, ball_slug=ball.slug
+    )
     if not caught:
         console.print("[yellow]¡Se soltó![/] (era solo una demo)")
+    return 0
+
+
+def cmd_demo_evolucion(args: argparse.Namespace) -> int:
+    """Prueba visual segura: no toca capturas, experiencia ni encuentros."""
+    animation.play_evolution_animation(
+        console, args.origen, args.form_origen, args.destino, args.form_destino,
+        args.shiny, speed=args.speed,
+    )
     return 0
 
 
@@ -423,13 +619,14 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "Ejemplos:\n"
             "  pokedex ver                     ¿qué Pokémon está esperando?\n"
-            "  pokedex capturar --bola ultra  intenta capturarlo con una Ultrabola\n"
-            "  pokedex bolsas                  consulta y repone tus bolas especiales\n"
+            "  pokedex capturar --bola ultra  intenta capturarlo con una Ultraball\n"
+            "  pokedex bolsas                  consulta y repone tus Pokeballs especiales\n"
             "  pokedex list                    tus capturas\n"
             "  pokedex search charizard -f mega-x     ficha de una forma concreta\n"
             "  pokedex equipo add 3            mete la captura #3 en tu equipo\n"
             "  pokedex demo                    prueba la animación sin capturar\n"
             "  pokedex demo -L                 pruébala contra un legendario al azar\n"
+            "  pokedex demo-evolucion bulbasaur ivysaur  prueba una evolución\n"
             "\nAutocompletado zsh:  pokedex completion zsh > ~/.zfunc/_pokedex"
         ),
     )
@@ -454,8 +651,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     capturar_parser = subparsers.add_parser(
         "capturar", help="intenta capturar el Pokémon que está esperando",
-        description="Elige una Pokébola y lánzala al Pokémon que está esperando. La "
-        "Pokébola normal es infinita; las especiales aumentan la probabilidad y se "
+        description="Elige una Pokeball y lánzala al Pokémon que está esperando. La "
+        "Pokeball normal es infinita; las especiales aumentan la probabilidad y se "
         "reponen con tiempo y actividad Git. Si se suelta, puedes reintentarlo.",
     )
     capturar_parser.add_argument(
@@ -469,8 +666,8 @@ def build_parser() -> argparse.ArgumentParser:
     capturar_parser.set_defaults(func=cmd_capturar)
 
     bolsas_parser = subparsers.add_parser(
-        "bolsas", help="muestra y actualiza tus Pokébolas",
-        description="Muestra el stock. La Pokébola normal es infinita; las especiales "
+        "bolsas", help="muestra y actualiza tus Pokeballs",
+        description="Muestra el stock. La Pokeball normal es infinita; las especiales "
         "se reponen con tiempo y commits propios en horario laboral.",
     )
     bolsas_parser.add_argument(
@@ -514,14 +711,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     equipo_parser = subparsers.add_parser(
         "equipo", help="ve o gestiona tu equipo (máx. 6)",
-        description="Sin argumentos muestra tu equipo. Con add/remove <id> lo gestiona.",
+        description="Sin argumentos muestra tu equipo. `add` abre un selector; "
+        "add/remove <id> permite gestionarlo directamente.",
     )
     equipo_parser.add_argument(
         "accion", nargs="?", choices=["add", "remove"], metavar="{add,remove}",
         help="añade o quita una captura del equipo",
     )
     equipo_parser.add_argument(
-        "id", nargs="?", type=int, help="id de captura (el que sale en `pokedex list`)",
+        "id", nargs="?", type=int,
+        help="id de captura; si se omite en `add`, abre el selector interactivo",
     )
     equipo_parser.set_defaults(func=cmd_equipo)
 
@@ -566,7 +765,26 @@ def build_parser() -> argparse.ArgumentParser:
         "-r", "--result", choices=["random", "catch", "escape"], default="random",
         help="fuerza el resultado (por defecto: al azar)",
     )
+    demo_parser.add_argument(
+        "-b", "--bola", default="poke", choices=["poke", "super", "ultra", "master"],
+        help="Pokeball cuya animación quieres probar (por defecto: poke)",
+    )
     demo_parser.set_defaults(func=cmd_demo)
+
+    evolution_demo = subparsers.add_parser(
+        "demo-evolucion", help="prueba la animación de evolución sin guardar nada",
+        description="Hace evolucionar visualmente dos especies sin tocar tu partida.",
+    )
+    evolution_demo.add_argument("origen", nargs="?", default="bulbasaur")
+    evolution_demo.add_argument("destino", nargs="?", default="ivysaur")
+    evolution_demo.add_argument("--form-origen", default="regular", metavar="FORMA")
+    evolution_demo.add_argument("--form-destino", default="regular", metavar="FORMA")
+    evolution_demo.add_argument("-s", "--shiny", action="store_true")
+    evolution_demo.add_argument(
+        "--speed", type=float, default=1.0, metavar="FACTOR",
+        help="factor de duración: 0.7 más rápida, 1.4 más pausada",
+    )
+    evolution_demo.set_defaults(func=cmd_demo_evolucion)
 
     completion_parser = subparsers.add_parser(
         "completion", help="imprime el script de autocompletado del shell",

@@ -1,3 +1,5 @@
+import re
+
 import requests
 
 BASE_URL = "https://pokeapi.co/api/v2"
@@ -42,7 +44,73 @@ def _pokemon_stats_and_types(pokemon_json: dict) -> dict:
         key = STAT_NAME_MAP.get(stat["stat"]["name"])
         if key:
             stats[key] = stat["base_stat"]
-    return {"types": types, **stats}
+    return {
+        "types": types,
+        "base_experience": pokemon_json.get("base_experience"),
+        **stats,
+    }
+
+
+def _level_evolutions(species_json: dict, species: str, form: str) -> list[dict]:
+    chain_url = species_json.get("evolution_chain", {}).get("url")
+    chain_json = _get_json(chain_url) if chain_url else None
+    if not chain_json:
+        return []
+
+    current_form_name = species if form == "regular" else f"{species}-{form}"
+    # Una misma evolucion puede tener reglas distintas por version. Conservamos
+    # la primera version cronologica (Rojo/Azul para la Gen I), no el nivel mas
+    # bajo introducido años despues.
+    found: dict[tuple[str, str], tuple[int, dict]] = {}
+
+    def walk(node: dict) -> None:
+        if node.get("species", {}).get("name") == species:
+            for child in node.get("evolves_to", []):
+                target = child.get("species", {}).get("name")
+                for detail in child.get("evolution_details", []):
+                    trigger = detail.get("trigger", {}).get("name")
+                    extra_conditions = (
+                        "gender", "held_item", "item", "known_move", "known_move_type",
+                        "location", "min_affection", "min_beauty", "min_happiness",
+                        "min_damage_taken", "min_move_count", "min_steps",
+                        "near_special_rock", "needs_multiplayer", "needs_overworld_rain",
+                        "party_species", "party_type", "region",
+                        "relative_physical_stats", "time_of_day", "trade_species",
+                        "turn_upside_down", "used_move",
+                    )
+                    is_pure_level = not any(detail.get(key) for key in extra_conditions)
+                    base_form = detail.get("base_form")
+                    base_form_name = base_form.get("name") if base_form else None
+                    matches_form = (
+                        (form == "regular" and base_form_name is None)
+                        or base_form_name == current_form_name
+                    )
+                    if (
+                        trigger != "level-up" or not detail.get("min_level")
+                        or not matches_form or not is_pure_level
+                    ):
+                        continue
+                    evolved_form = detail.get("evolved_form")
+                    evolved_name = evolved_form.get("name") if evolved_form else target
+                    target_form = "regular"
+                    if evolved_name and target and evolved_name.startswith(target + "-"):
+                        target_form = evolved_name[len(target) + 1:]
+                    option = {
+                        "species": target,
+                        "form": target_form,
+                        "min_level": int(detail["min_level"]),
+                    }
+                    version_url = detail.get("version_group", {}).get("url", "")
+                    match = re.search(r"/(\d+)/?$", version_url)
+                    version_order = int(match.group(1)) if match else 10_000
+                    key = (target, target_form)
+                    if target and (key not in found or version_order < found[key][0]):
+                        found[key] = (version_order, option)
+        for child in node.get("evolves_to", []):
+            walk(child)
+
+    walk(chain_json.get("chain", {}))
+    return [entry[1] for entry in sorted(found.values(), key=lambda entry: entry[0])]
 
 
 def fetch_species_data(species: str, form: str) -> dict | None:
@@ -83,6 +151,8 @@ def fetch_species_data(species: str, form: str) -> dict | None:
         "is_legendary": bool(species_json.get("is_legendary")),
         "is_mythical": bool(species_json.get("is_mythical")),
         "generation": species_json.get("generation", {}).get("name"),
+        "growth_rate": species_json.get("growth_rate", {}).get("name"),
+        "level_evolutions": _level_evolutions(species_json, species, form),
         "flavor_text": _flavor_text(species_json),
         "form_data_exact": form_data_exact,
         **_pokemon_stats_and_types(pokemon_json),

@@ -26,23 +26,23 @@ class InventoryTests(unittest.TestCase):
             self.inventory_path, datetime(2026, 7, 13, 9, tzinfo=UTC)
         )
         self.assertEqual(state["balls"], inventory.INITIAL_STOCK)
-        self.assertIsNone(inventory.stock_count(state, "pokebola"))
+        self.assertIsNone(inventory.stock_count(state, "pokeball"))
 
-        inventory.consume_ball("pokebola", self.inventory_path)
+        inventory.consume_ball("pokeball", self.inventory_path)
         after = inventory.load_inventory(self.inventory_path)
         self.assertEqual(after["balls"], inventory.INITIAL_STOCK)
 
     def test_special_ball_is_consumed_and_cannot_go_below_zero(self):
         state = inventory.load_inventory(self.inventory_path)
-        state["balls"]["ultrabola"] = 1
+        state["balls"]["ultraball"] = 1
         inventory.save_inventory(state, self.inventory_path)
 
-        inventory.consume_ball("ultrabola", self.inventory_path)
+        inventory.consume_ball("ultraball", self.inventory_path)
         self.assertEqual(
-            inventory.load_inventory(self.inventory_path)["balls"]["ultrabola"], 0
+            inventory.load_inventory(self.inventory_path)["balls"]["ultraball"], 0
         )
-        with self.assertRaisesRegex(ValueError, "Ultrabola"):
-            inventory.consume_ball("ultrabola", self.inventory_path)
+        with self.assertRaisesRegex(ValueError, "Ultraball"):
+            inventory.consume_ball("ultraball", self.inventory_path)
 
     def test_time_grants_one_super_ball_per_day(self):
         start = datetime(2026, 7, 13, 9, tzinfo=UTC)
@@ -53,8 +53,8 @@ class InventoryTests(unittest.TestCase):
             home=self.root,
             now=datetime(2026, 7, 15, 10, tzinfo=UTC),
         )
-        self.assertEqual(result.inventory["balls"]["superbola"], 5)
-        self.assertEqual(result.rewards, (inventory.Reward("superbola", 2, "tiempo"),))
+        self.assertEqual(result.inventory["balls"]["superball"], 5)
+        self.assertEqual(result.rewards, (inventory.Reward("superball", 2, "tiempo"),))
 
     def test_commit_thresholds_are_cumulative(self):
         state = inventory.load_inventory(self.inventory_path)
@@ -62,27 +62,27 @@ class InventoryTests(unittest.TestCase):
         rewards = inventory._sync_commit_rewards(state, 2)
 
         self.assertEqual(state["activity"]["work_commits"], 10)
-        self.assertEqual(state["balls"]["superbola"], 4)
-        self.assertEqual(state["balls"]["ultrabola"], 2)
+        self.assertEqual(state["balls"]["superball"], 4)
+        self.assertEqual(state["balls"]["ultraball"], 2)
         self.assertEqual(
             rewards,
             [
-                inventory.Reward("superbola", 1, "commits"),
-                inventory.Reward("ultrabola", 1, "commits"),
+                inventory.Reward("superball", 1, "commits"),
+                inventory.Reward("ultraball", 1, "commits"),
             ],
         )
 
     def test_commits_until_next_reward(self):
         state = inventory.load_inventory(self.inventory_path)
-        self.assertEqual(inventory.commits_until_next(state, "superbola"), 3)
-        self.assertEqual(inventory.commits_until_next(state, "ultrabola"), 10)
-        self.assertEqual(inventory.commits_until_next(state, "masterbola"), 50)
-        self.assertIsNone(inventory.commits_until_next(state, "pokebola"))
+        self.assertEqual(inventory.commits_until_next(state, "superball"), 3)
+        self.assertEqual(inventory.commits_until_next(state, "ultraball"), 10)
+        self.assertEqual(inventory.commits_until_next(state, "masterball"), 50)
+        self.assertIsNone(inventory.commits_until_next(state, "pokeball"))
 
         state["activity"]["work_commits"] = 9
-        self.assertEqual(inventory.commits_until_next(state, "superbola"), 3)
-        self.assertEqual(inventory.commits_until_next(state, "ultrabola"), 1)
-        self.assertEqual(inventory.commits_until_next(state, "masterbola"), 41)
+        self.assertEqual(inventory.commits_until_next(state, "superball"), 3)
+        self.assertEqual(inventory.commits_until_next(state, "ultraball"), 1)
+        self.assertEqual(inventory.commits_until_next(state, "masterball"), 41)
 
     def test_discovers_and_counts_only_own_work_hour_commits(self):
         repo = self.root / "project"
@@ -131,8 +131,11 @@ class InventoryTests(unittest.TestCase):
             now=datetime(2026, 7, 14, 7, tzinfo=UTC),
         )
         self.assertEqual(result.new_work_commits, 3)
+        self.assertEqual(len(result.commits), 3)
+        self.assertTrue(all(commit.additions == 1 for commit in result.commits))
+        self.assertTrue(all(commit.deletions == 0 for commit in result.commits))
         self.assertEqual(result.inventory["activity"]["work_commits"], 3)
-        self.assertEqual(result.inventory["balls"]["superbola"], 4)
+        self.assertEqual(result.inventory["balls"]["superball"], 4)
 
     def test_first_sync_does_not_import_recent_history(self):
         repo = self.root / "old-project"
