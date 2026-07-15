@@ -95,3 +95,31 @@ def test_invalid_and_non_level_options_do_not_queue(tmp_path: Path) -> None:
     assert repository.decode_options('[{"species":"x"}, {"trigger":"stone"}]') == []
     assert repository.decode_options("{") == []
     assert repository.decode_options(None) == []
+
+
+def test_completed_evolution_clears_the_ability_but_leaves_gender_untouched(
+    tmp_path: Path,
+) -> None:
+    use_case, path = build_use_case(tmp_path)
+    capture_id = seed_pending(path, "bulbasaur", "ivysaur")
+    connection = database.connect(path)
+    try:
+        connection.execute(
+            "UPDATE captures SET gender = 'female', ability = 'overgrow' WHERE id = ?",
+            (capture_id,),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    use_case.execute([capture_id])
+
+    connection = database.connect(path)
+    try:
+        row = connection.execute(
+            "SELECT gender, ability FROM captures WHERE id = ?", (capture_id,)
+        ).fetchone()
+        assert row["gender"] == "female"
+        assert row["ability"] is None
+    finally:
+        connection.close()

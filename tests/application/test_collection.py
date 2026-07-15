@@ -1,4 +1,5 @@
 from pokedex_cli.application.collection import CollectionQueries
+from pokedex_cli.domain.individuality import STAT_KEYS, compute_stats, derive_ivs_nature
 
 
 def row(
@@ -13,6 +14,7 @@ def row(
     stats=(),
     level=5,
     experience=0,
+    caught_at="2026-07-15T10:00:00+00:00",
 ):
     values = {
         "id": capture_id,
@@ -31,11 +33,32 @@ def row(
         "level": level,
         "experience": experience,
         "growth_rate": "medium",
+        "caught_at": caught_at,
+        # No stored individuality: every test row exercises the same
+        # deterministic-derivation fallback the retroactive backfill uses.
+        "iv_hp": None,
+        "iv_atk": None,
+        "iv_def": None,
+        "iv_spa": None,
+        "iv_spd": None,
+        "iv_spe": None,
+        "nature": None,
+        "gender": None,
+        "ability": None,
+        "gender_rate": None,
+        "abilities": None,
     }
     if stats:
         for key, value in zip(("hp", "atk", "def", "spa", "spd", "spe"), stats, strict=True):
             values[key] = value
     return values
+
+
+def expected_actual_total(capture_id: int, caught_at: str, bases: dict) -> int:
+    """Independent oracle: same derivation the collection query falls back to."""
+    ivs, nature = derive_ivs_nature(f"{capture_id}:{caught_at}")
+    stats = compute_stats(bases, ivs, 5, nature)
+    return sum(value for value in stats.values() if value is not None)
 
 
 class Repository:
@@ -80,7 +103,13 @@ def test_team_available_types_ranking_and_rare_views_are_prepared():
 
     ranked, missing = service.ranking()
     assert [item["species"] for item in ranked] == ["mew", "raichu"]
-    assert [item["total"] for item in ranked] == [600, 485]
+    mew_bases = {key: 100 for key in STAT_KEYS}
+    raichu_bases = dict(zip(STAT_KEYS, (60, 90, 55, 90, 80, 110), strict=True))
+    assert [item["total"] for item in ranked] == [
+        expected_actual_total(2, "2026-07-15T10:00:00+00:00", mew_bases),
+        expected_actual_total(3, "2026-07-15T10:00:00+00:00", raichu_bases),
+    ]
+    assert [item["base_total"] for item in ranked] == [600, 485]
     assert missing == 1
     assert [item["species"] for item in service.rare()] == ["mew"]
 

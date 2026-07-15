@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+from pokedex_cli.domain import individuality
 from pokedex_cli.domain.identity import normalize_form, normalize_species
+from pokedex_cli.domain.individuality import Nature
 from pokedex_cli.domain.progression import (
     MAX_LEVEL,
     STARTING_LEVEL,
@@ -12,6 +14,27 @@ from pokedex_cli.domain.progression import (
 )
 
 CaptureView = dict[str, Any]
+
+
+def _resolve_individuality(row: CaptureView) -> tuple[dict[str, int], Nature]:
+    """Ivs/nature for a capture row: stored values when present, otherwise
+    the same deterministic derivation the retroactive backfill persists (a
+    pure read here never writes anything back)."""
+    stored_nature = individuality.nature_by_name(row.get("nature"))
+    stored_ivs: dict[str, int] = {}
+    for key in individuality.STAT_KEYS:
+        value = row.get(f"iv_{key}")
+        if isinstance(value, int):
+            stored_ivs[key] = value
+    complete = len(stored_ivs) == len(individuality.STAT_KEYS)
+    if complete and stored_nature is not None:
+        return stored_ivs, stored_nature
+
+    seed_material = f"{row.get('id')}:{row.get('caught_at')}"
+    derived_ivs, derived_nature = individuality.derive_ivs_nature(seed_material)
+    ivs = stored_ivs if complete else derived_ivs
+    nature = stored_nature if stored_nature is not None else derived_nature
+    return ivs, nature
 
 
 class CollectionRepository(Protocol):
@@ -38,6 +61,21 @@ class CollectionQueries:
             else:
                 row["experience_into_level"] = 0
                 row["experience_for_next_level"] = 0
+
+            ivs, nature = _resolve_individuality(row)
+            row["ivs"] = ivs
+            # Exposed as the Nature object itself (not the raw column, and not
+            # separate nature_name/nature_es/plus/minus keys): the display
+            # layer needs all four fields together, and a single typed object
+            # keeps that call site simple without re-deriving anything.
+            row["nature"] = nature
+            bases: dict[str, int | None] = {key: row.get(key) for key in individuality.STAT_KEYS}
+            stats = individuality.compute_stats(bases, ivs, level, nature)
+            row["stats"] = stats
+            if any(value is None for value in stats.values()):
+                row["stats_total"] = None
+            else:
+                row["stats_total"] = sum(value for value in stats.values() if value is not None)
         return rows
 
     def resolve(self, identifier: str, form: str | None) -> CaptureView | None:
@@ -72,6 +110,8 @@ class CollectionQueries:
         return counts
 
     def ranking(self) -> tuple[list[CaptureView], int]:
+        """Rank by current stats at level (real progress), keeping the base
+        total (``base_total``) available for the table's dim column."""
         ranked: list[CaptureView] = []
         missing = 0
         for source in self.captures():
@@ -79,9 +119,9 @@ class CollectionQueries:
                 missing += 1
                 continue
             row = dict(source)
-            row["total"] = sum(
-                int(row.get(key) or 0) for key in ("hp", "atk", "def", "spa", "spd", "spe")
-            )
+            row["base_total"] = sum(int(row.get(key) or 0) for key in individuality.STAT_KEYS)
+            stats_total = row.get("stats_total")
+            row["total"] = stats_total if stats_total is not None else row["base_total"]
             ranked.append(row)
         ranked.sort(key=lambda row: -int(row["total"]))
         return ranked, missing

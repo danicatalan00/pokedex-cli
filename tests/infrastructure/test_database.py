@@ -17,7 +17,7 @@ def test_new_database_enables_integrity_and_concurrency_pragmas(tmp_path: Path) 
         versions = connection.execute(
             "SELECT version FROM schema_migrations ORDER BY version"
         ).fetchall()
-        assert [row[0] for row in versions] == [1, 2, 3, 4, 5, 6]
+        assert [row[0] for row in versions] == [1, 2, 3, 4, 5, 6, 7]
     finally:
         connection.close()
 
@@ -38,12 +38,13 @@ def test_migrations_are_idempotent(tmp_path: Path) -> None:
             (4, 1),
             (5, 1),
             (6, 1),
+            (7, 1),
         ]
     finally:
         second.close()
 
 
-@pytest.mark.parametrize("historical_version", range(1, 7))
+@pytest.mark.parametrize("historical_version", range(1, 8))
 def test_every_recorded_historical_schema_upgrades_without_losing_captures(
     tmp_path: Path, historical_version: int
 ) -> None:
@@ -63,12 +64,16 @@ def test_every_recorded_historical_schema_upgrades_without_losing_captures(
         assert [
             row[0]
             for row in upgraded.execute("SELECT version FROM schema_migrations ORDER BY version")
-        ] == [1, 2, 3, 4, 5, 6]
+        ] == [1, 2, 3, 4, 5, 6, 7]
         assert database._columns(upgraded, "captures") >= {
             "ball_slug",
             "level",
             "experience",
             "pending_evolution_species",
+            "iv_hp",
+            "nature",
+            "gender",
+            "ability",
         }
     finally:
         upgraded.close()
@@ -140,3 +145,52 @@ def test_failing_migration_rolls_back_its_schema_and_version(tmp_path: Path) -> 
     )
     assert connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 0
     connection.close()
+
+
+def test_migration_007_backfills_deterministic_ivs_and_nature_but_not_gender_or_ability(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "individuality.db"
+    old = sqlite3.connect(path)
+    database.migrate(old, database.MIGRATIONS[:6])
+    old.execute(
+        "INSERT INTO captures (id, species, form, shiny, caught_at) "
+        "VALUES (1, 'pikachu', 'regular', 0, '2026-07-15T10:00:00+00:00')"
+    )
+    old.commit()
+    old.close()
+
+    from pokedex_cli.domain.individuality import derive_ivs_nature
+
+    expected_ivs, expected_nature = derive_ivs_nature("1:2026-07-15T10:00:00+00:00")
+
+    upgraded = database.connect(path)
+    try:
+        row = upgraded.execute(
+            "SELECT iv_hp, iv_atk, iv_def, iv_spa, iv_spd, iv_spe, nature, gender, ability "
+            "FROM captures WHERE id = 1"
+        ).fetchone()
+        assert (row["iv_hp"], row["iv_atk"], row["iv_def"], row["iv_spa"], row["iv_spd"]) == (
+            expected_ivs["hp"],
+            expected_ivs["atk"],
+            expected_ivs["def"],
+            expected_ivs["spa"],
+            expected_ivs["spd"],
+        )
+        assert row["iv_spe"] == expected_ivs["spe"]
+        assert row["nature"] == expected_nature.name
+        assert row["gender"] is None
+        assert row["ability"] is None
+        assert database._columns(upgraded, "species_cache") >= {"gender_rate", "abilities"}
+    finally:
+        upgraded.close()
+
+    # Applying it again (a fresh connection re-running every registered
+    # migration) must be a no-op: same values, no crash.
+    again = database.connect(path)
+    try:
+        row = again.execute("SELECT iv_hp, nature FROM captures WHERE id = 1").fetchone()
+        assert row["iv_hp"] == expected_ivs["hp"]
+        assert row["nature"] == expected_nature.name
+    finally:
+        again.close()

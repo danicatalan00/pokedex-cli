@@ -148,8 +148,9 @@ def upsert_species_cache(
         INSERT INTO species_cache
             (species, form, pokedex_id, capture_rate, types, hp, atk, def, spa, spd, spe,
              is_legendary, is_mythical, generation, flavor_text, form_data_exact,
-             growth_rate, base_experience, level_evolutions, fetched_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             growth_rate, base_experience, level_evolutions, gender_rate, abilities,
+             fetched_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(species, form) DO UPDATE SET
             pokedex_id=excluded.pokedex_id, capture_rate=excluded.capture_rate,
             types=excluded.types,
@@ -160,7 +161,9 @@ def upsert_species_cache(
             form_data_exact=excluded.form_data_exact, fetched_at=excluded.fetched_at
             , growth_rate=excluded.growth_rate,
             base_experience=excluded.base_experience,
-            level_evolutions=excluded.level_evolutions
+            level_evolutions=excluded.level_evolutions,
+            gender_rate=excluded.gender_rate,
+            abilities=excluded.abilities
         """,
         (
             species,
@@ -182,6 +185,8 @@ def upsert_species_cache(
             data.get("growth_rate"),
             data.get("base_experience"),
             json.dumps(data.get("level_evolutions", [])),
+            data.get("gender_rate"),
+            json.dumps(data.get("abilities", [])),
             fetched_at,
         ),
     )

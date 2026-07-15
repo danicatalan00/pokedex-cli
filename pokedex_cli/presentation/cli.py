@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import select
 import sys
@@ -170,6 +171,8 @@ def cmd_capturar(args: argparse.Namespace) -> int:
             is_legendary=bool(cache["is_legendary"]) if cache is not None else False,
             is_mythical=bool(cache["is_mythical"]) if cache is not None else False,
             growth_rate=_cache_value(cache, "growth_rate", "medium"),
+            gender_rate=_cache_gender_rate(cache),
+            abilities=_cache_abilities(cache),
         )
     )
     if result.status is capture_application.CaptureStatus.NO_STOCK:
@@ -239,6 +242,35 @@ def _cache_value(cache, key: str, default):
     return cache[key] if key in cache.keys() and cache[key] is not None else default
 
 
+def _cache_field(cache, key: str):
+    """Read a cache field verbatim: unlike ``_cache_value`` this does not
+    collapse a valid falsy value (e.g. ``gender_rate == 0``, always male)."""
+    if cache is None:
+        return None
+    if isinstance(cache, dict):
+        return cache.get(key)
+    return cache[key] if key in cache.keys() else None
+
+
+def _cache_gender_rate(cache) -> int | None:
+    value = _cache_field(cache, "gender_rate")
+    return value if isinstance(value, int) else None
+
+
+def _cache_abilities(cache) -> tuple[str, ...]:
+    """Parse the cached abilities JSON, tolerant to a missing/malformed cache."""
+    raw = _cache_field(cache, "abilities")
+    if not raw:
+        return ()
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return ()
+    if not isinstance(parsed, list):
+        return ()
+    return tuple(str(item) for item in parsed)
+
+
 def cmd_bolsas(args: argparse.Namespace) -> int:
     result, training = _sync_training(force_repo_scan=True)
     _print_activity_rewards(result)
@@ -282,6 +314,7 @@ def cmd_bolsas(args: argparse.Namespace) -> int:
 
 
 def cmd_list(args: argparse.Namespace) -> int:
+    composition.backfill_individuality().execute()
     display.render_list_table(console, _collection_queries().captures())
     return 0
 
@@ -428,6 +461,7 @@ def _select_capture_for_team(action: team_application.TeamAction, name: str | No
 def cmd_vision(args: argparse.Namespace) -> int:
     """Vista enriquecida de un Pokémon que YA has capturado: sprite de krabby
     + ficha completa de PokeAPI."""
+    composition.backfill_individuality().execute()
     queries = _collection_queries()
     row = queries.resolve(args.pokemon, args.form)
     if row is None:
@@ -441,6 +475,15 @@ def cmd_vision(args: argparse.Namespace) -> int:
     # Si se capturó sin conexión, intenta enriquecer ahora.
     if row["types"] is None:
         _species_data_use_case().execute(row["species"], row["form"])
+        refreshed = _collection_queries().resolve(str(row["id"]), None)
+        if refreshed is not None:
+            row = refreshed
+
+    # Cachés antiguas (previas a esta fase) no tienen gender_rate/abilities:
+    # se curan solas al mirar el Pokémon (`pokedex refresh` las cura en bloque).
+    if row.get("gender_rate") is None and row["types"] is not None:
+        _species_data_use_case().execute(row["species"], row["form"], refresh=True)
+        composition.backfill_individuality().execute()
         refreshed = _collection_queries().resolve(str(row["id"]), None)
         if refreshed is not None:
             row = refreshed
@@ -521,6 +564,7 @@ def cmd_tipos(args: argparse.Namespace) -> int:
 
 
 def cmd_ranking(args: argparse.Namespace) -> int:
+    composition.backfill_individuality().execute()
     ranked, missing = _collection_queries().ranking()
     display.render_ranking_table(console, ranked, missing)
     return 0

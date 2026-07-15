@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Protocol
 
 from pokedex_cli.domain.capture import catch_chance, escape_after_attempts
+from pokedex_cli.domain.individuality import (
+    gender_from_roll,
+    roll_ability,
+    roll_ivs,
+    roll_nature,
+)
 from pokedex_cli.domain.progression import STARTING_LEVEL, experience_for_level
 
 Inventory = dict[str, Any]
@@ -49,6 +55,10 @@ class CaptureRepository(Protocol):
         caught_at: str,
         ball_slug: str,
         experience: int,
+        ivs: Mapping[str, int],
+        nature: str,
+        gender: str | None,
+        ability: str | None,
     ) -> int: ...
 
 
@@ -71,6 +81,8 @@ class CaptureCommand:
     is_legendary: bool
     is_mythical: bool
     growth_rate: str | None
+    gender_rate: int | None = None
+    abilities: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -134,6 +146,12 @@ class CaptureEncounter:
             if caught:
                 encounter["captured"] = True
                 self._encounter_repository.save_in_transaction(connection, encounter)
+                # Fixed roll order (ivs, nature, gender, ability) so that
+                # tests with a fake RNG are stable across changes here.
+                ivs = roll_ivs(self._random)
+                nature = roll_nature(self._random)
+                gender = gender_from_roll(command.gender_rate, self._random.random())
+                ability = roll_ability(command.abilities, self._random)
                 capture_id = self._capture_repository.insert(
                     connection,
                     species=str(encounter["species"]),
@@ -142,6 +160,10 @@ class CaptureEncounter:
                     caught_at=command.caught_at,
                     ball_slug=command.ball_slug,
                     experience=experience_for_level(command.growth_rate, STARTING_LEVEL),
+                    ivs=ivs,
+                    nature=nature.name,
+                    gender=gender,
+                    ability=ability,
                 )
                 connection.commit()
                 return CaptureResult(CaptureStatus.CAUGHT, chance=chance, capture_id=capture_id)

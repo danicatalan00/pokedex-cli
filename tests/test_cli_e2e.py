@@ -81,6 +81,10 @@ def cache_species(connection, species: str, *, capture_rate: int = 190, mythical
             "growth_rate": "medium",
             "base_experience": 112,
             "level_evolutions": [],
+            # gender_rate/abilities present so `pokedex vision` never tries a
+            # real PokeAPI refresh in these network-free tests.
+            "gender_rate": 4,
+            "abilities": ["static", "lightning-rod"],
         },
         "2026-07-15T10:00:00+00:00",
     )
@@ -175,7 +179,7 @@ def test_version_one_database_is_upgraded_by_the_real_cli(tmp_path: Path) -> Non
     assert "Pikachu" in result.stdout
     upgraded = database.connect(path)
     try:
-        assert upgraded.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 6
+        assert upgraded.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 7
     finally:
         upgraded.close()
 

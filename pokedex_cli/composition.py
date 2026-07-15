@@ -13,6 +13,7 @@ from pokedex_cli.application import capture as capture_application
 from pokedex_cli.application import collection as collection_application
 from pokedex_cli.application import evolutions as evolution_application
 from pokedex_cli.application import hook as hook_application
+from pokedex_cli.application import individuality as individuality_application
 from pokedex_cli.application import species as species_application
 from pokedex_cli.application import team as team_application
 from pokedex_cli.application import training as training_application
@@ -27,6 +28,7 @@ from pokedex_cli.infrastructure.repositories import (
     SQLiteCollectionRepository,
     SQLiteEncounterRepository,
     SQLiteEvolutionRepository,
+    SQLiteIndividualityRepository,
     SQLiteInventoryRepository,
     SQLiteSpeciesCacheRepository,
     SQLiteTeamRepository,
@@ -80,6 +82,13 @@ def manage_team() -> team_application.ManageTeam:
 
 def collection_queries() -> collection_application.CollectionQueries:
     return collection_application.CollectionQueries(SQLiteCollectionRepository(paths.DB_PATH))
+
+
+def backfill_individuality() -> individuality_application.BackfillIndividuality:
+    return individuality_application.BackfillIndividuality(
+        connection_factory=lambda: database.connect(paths.DB_PATH),
+        repository=SQLiteIndividualityRepository(),
+    )
 
 
 def species_data() -> species_application.GetSpeciesData:

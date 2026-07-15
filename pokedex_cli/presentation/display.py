@@ -66,7 +66,7 @@ def render_list_table(console: Console, rows: list[dict]) -> None:
     table.add_column("Equipo", justify="center")
     table.add_column("Capturado")
     for row in rows:
-        name = display_name(row["species"], row["form"])
+        name = display_name(row["species"], row["form"]) + _gender_suffix(row.get("gender"))
         types = type_badges(row["types"]) if row["types"] else "?"
         dex = f"#{row['pokedex_id']:03d}" if row.get("pokedex_id") else "—"
         table.add_row(
@@ -163,9 +163,76 @@ def _stat_bar(value: int, width: int = 16) -> str:
     return f"[{color}]{'█' * filled}[/][grey30]{'━' * (width - filled)}[/]"
 
 
+STAT_LABEL_BY_KEY = {key: label for label, key in STAT_LABELS}
+
+GENDER_SYMBOLS = {
+    "male": ("♂", "dodger_blue1"),
+    "female": ("♀", "pink1"),
+}
+
+
+def _gender_suffix(gender: str | None) -> str:
+    """Markup suffix for a gender symbol, or '' (genderless/unknown)."""
+    symbol = GENDER_SYMBOLS.get(gender or "")
+    if symbol is None:
+        return ""
+    glyph, color = symbol
+    return f" [{color}]{glyph}[/]"
+
+
+def _stat_color_current(value: int) -> str:
+    """Colour scale for CURRENT (at-level) stats: 400 is roughly the
+    practical ceiling for a Gen 3 stat at level 100."""
+    if value >= 350:
+        return "green1"
+    if value >= 250:
+        return "green3"
+    if value >= 180:
+        return "chartreuse3"
+    if value >= 120:
+        return "yellow3"
+    if value >= 70:
+        return "orange3"
+    return "red3"
+
+
+def _stat_bar_current(value: int, width: int = 16) -> str:
+    v = value or 0
+    filled = min(width, max(1, round(v / 400 * width))) if v else 0
+    color = _stat_color_current(v)
+    return f"[{color}]{'█' * filled}[/][grey30]{'━' * (width - filled)}[/]"
+
+
+def _nature_ability_line(row: dict) -> Text:
+    """`Naturaleza Firme (+Ataque −At. Esp.) · Habilidad Torrent`, with a
+    hint to run `pokedex refresh` while gender/ability are still unknown."""
+    nature = row.get("nature")
+    if nature is None:
+        nature_text = ""
+    elif nature.plus is None:
+        nature_text = f"Naturaleza {nature.name_es} (neutra)"
+    else:
+        plus_label = STAT_LABEL_BY_KEY.get(nature.plus, nature.plus)
+        minus_label = STAT_LABEL_BY_KEY.get(nature.minus, nature.minus)
+        nature_text = f"Naturaleza {nature.name_es} (+{plus_label} −{minus_label})"
+
+    ability = row.get("ability")
+    if ability:
+        ability_text = f"Habilidad {ability.replace('-', ' ').title()}"
+    else:
+        ability_text = "Habilidad —"
+
+    parts = [part for part in (nature_text, ability_text) if part]
+    line = " · ".join(parts)
+    if row.get("gender_rate") is None:
+        line += "  [dim](datos pendientes: pokedex refresh)[/]"
+    return Text.from_markup(line)
+
+
 def render_vision_card(console: Console, row: dict, sprite: str | None) -> None:
     """Vista de detalle: sprite grande + ficha enriquecida, estilo pantalla
-    de Pokédex."""
+    de Pokédex. Las barras muestran las stats ACTUALES al nivel (fórmula
+    Gen 3); la info base (stat base + IV) queda visible en sutil."""
     species, form = row["species"], row["form"]
     name = display_name(species, form)
     types = row["types"] or []
@@ -177,6 +244,7 @@ def render_vision_card(console: Console, row: dict, sprite: str | None) -> None:
     header = Text()
     header.append(f"N.º {dex}  ", style="bold grey62")
     header.append(name, style=f"bold {accent}")
+    header.append(Text.from_markup(_gender_suffix(row.get("gender"))))
     if row["shiny"]:
         header.append("  ✨ shiny", style="bold yellow1")
 
@@ -184,26 +252,50 @@ def render_vision_card(console: Console, row: dict, sprite: str | None) -> None:
     if types:
         blocks.append(Text.from_markup("  " + type_badges(types)))
 
-    # --- Stats con barras ---------------------------------------------------
+    # --- Stats con barras (actuales al nivel) --------------------------------
     if row["types"] is not None:
-        stats = Table.grid(padding=(0, 1))
-        stats.add_column(justify="right", style="bold grey70", min_width=9)
-        stats.add_column()
-        stats.add_column(justify="right", min_width=3)
-        total = 0
+        nature = row.get("nature")
+        ivs = row.get("ivs") or {}
+        stats = row.get("stats") or {}
+        stats_table = Table.grid(padding=(0, 1))
+        stats_table.add_column(justify="right", style="bold grey70", min_width=9)
+        stats_table.add_column()
+        stats_table.add_column(justify="right", min_width=3)
+        stats_table.add_column(justify="left")
+        current_total = 0
+        base_total = 0
         for label, key in STAT_LABELS:
-            v = row[key] or 0
-            total += v
-            stats.add_row(label, _stat_bar(v), f"[{_stat_color(v)}]{v}[/]")
-        stats.add_row("", "", "")
-        stats.add_row("[bold]Total[/]", "", f"[bold {accent}]{total}[/]")
-        blocks.append(stats)
+            current = stats.get(key) or 0
+            base = row.get(key) or 0
+            current_total += current
+            base_total += base
+            mark = ""
+            if nature is not None:
+                if nature.plus == key:
+                    mark = " [green3]▲[/]"
+                elif nature.minus == key:
+                    mark = " [red3]▼[/]"
+            stats_table.add_row(
+                f"{label}{mark}",
+                _stat_bar_current(current),
+                f"[bold {_stat_color_current(current)}]{current}[/]",
+                f"[dim]base {base} · IV {ivs.get(key, 0)}[/]",
+            )
+        stats_table.add_row("", "", "", "")
+        stats_table.add_row(
+            "[bold]Total[/]",
+            "",
+            f"[bold {accent}]{current_total}[/]",
+            f"[dim](base {base_total})[/]",
+        )
+        blocks.append(stats_table)
         if not row.get("form_data_exact", 1):
             blocks.append(
                 Text(
                     "stats de la forma base (sin datos exactos de la variante)", style="dim italic"
                 )
             )
+        blocks.append(_nature_ability_line(row))
     else:
         blocks.append(
             Text("Sin datos enriquecidos todavía (se capturó sin conexión).", style="dim italic")
@@ -326,13 +418,22 @@ def render_ranking_table(console: Console, rows: list[dict], missing: int) -> No
     table = Table(box=box.SIMPLE_HEAVY)
     table.add_column("")
     table.add_column("Pokémon")
+    table.add_column("Nivel", justify="right")
     table.add_column("Tipos")
-    table.add_column("Total stats", justify="right")
+    table.add_column("Total", justify="right")
+    table.add_column("Base", justify="right")
     for i, row in enumerate(rows):
         medal = MEDALS[i] if i < len(MEDALS) else str(i + 1)
-        name = display_name(row["species"], row["form"])
-        table.add_row(medal, name, type_badges(row["types"]), str(row["total"]))
-    console.print(hall_of_fame_panel("Ranking (suma de stats base)", table))
+        name = display_name(row["species"], row["form"]) + _gender_suffix(row.get("gender"))
+        table.add_row(
+            medal,
+            name,
+            str(row["level"]),
+            type_badges(row["types"]),
+            str(row["total"]),
+            f"[dim]{row['base_total']}[/]",
+        )
+    console.print(hall_of_fame_panel("Ranking (stats actuales)", table))
     if missing:
         console.print(
             f"[dim]{missing} captura(s) sin datos enriquecidos (sin conexión al capturarlas), "

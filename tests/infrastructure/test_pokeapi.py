@@ -67,6 +67,36 @@ def pokemon_payload() -> dict:
     }
 
 
+def test_success_includes_gender_rate_and_non_hidden_abilities_in_slot_order() -> None:
+    species = species_payload()
+    species["gender_rate"] = 4
+    pokemon = pokemon_payload()
+    pokemon["abilities"] = [
+        {"slot": 2, "is_hidden": False, "ability": {"name": "lightning-rod"}},
+        {"slot": 1, "is_hidden": False, "ability": {"name": "static"}},
+        {"slot": 3, "is_hidden": True, "ability": {"name": "quick-feet"}},
+    ]
+    session = FakeSession([FakeResponse(200, species), FakeResponse(200, pokemon)])
+    client = PokeApiClient(session=session)
+
+    result = client.fetch_species_data("pikachu", "regular")
+
+    assert result["gender_rate"] == 4
+    assert result["abilities"] == ["static", "lightning-rod"]
+
+
+def test_missing_gender_rate_and_abilities_default_to_none_and_empty() -> None:
+    session = FakeSession(
+        [FakeResponse(200, species_payload()), FakeResponse(200, pokemon_payload())]
+    )
+    client = PokeApiClient(session=session)
+
+    result = client.fetch_species_data("pikachu", "regular")
+
+    assert result["gender_rate"] is None
+    assert result["abilities"] == []
+
+
 def test_success_uses_injected_session_and_explicit_timeout() -> None:
     session = FakeSession(
         [FakeResponse(200, species_payload()), FakeResponse(200, pokemon_payload())]

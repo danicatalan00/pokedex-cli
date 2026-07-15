@@ -47,6 +47,17 @@ def _flavor_text(species_json: JsonObject) -> str | None:
     return None
 
 
+def _pokemon_abilities(pokemon_json: JsonObject) -> list[str]:
+    """Non-hidden abilities in slot order (Gen 3 canon: no hidden abilities)."""
+    visible = [
+        ability
+        for ability in pokemon_json.get("abilities", [])
+        if not ability.get("is_hidden", False)
+    ]
+    visible.sort(key=lambda ability: ability.get("slot", 0))
+    return [ability["ability"]["name"] for ability in visible]
+
+
 def _pokemon_stats_and_types(pokemon_json: JsonObject) -> JsonObject:
     types = [t["type"]["name"] for t in sorted(pokemon_json["types"], key=lambda t: t["slot"])]
     stats: JsonObject = {}
@@ -57,6 +68,7 @@ def _pokemon_stats_and_types(pokemon_json: JsonObject) -> JsonObject:
     return {
         "types": types,
         "base_experience": pokemon_json.get("base_experience"),
+        "abilities": _pokemon_abilities(pokemon_json),
         **stats,
     }
 

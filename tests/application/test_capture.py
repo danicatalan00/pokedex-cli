@@ -123,6 +123,95 @@ def test_success_atomically_consumes_ball_inserts_capture_and_marks_encounter(
     assert encounter_repository.read()["captured"] is True
 
 
+def test_success_with_unknown_gender_and_no_abilities_persists_nulls(tmp_path: Path) -> None:
+    # command() defaults gender_rate=None and abilities=(): both traits that
+    # need species data the capturer didn't have must be stored as NULL.
+    use_case, inventory_repository, encounter_repository = build_use_case(tmp_path)
+    seed(inventory_repository, encounter_repository)
+
+    result = use_case.execute(command())
+
+    connection = database.connect(tmp_path / "pokedex.db")
+    try:
+        row = connection.execute(
+            "SELECT iv_hp, iv_atk, iv_def, iv_spa, iv_spd, iv_spe, nature, gender, ability "
+            "FROM captures WHERE id = ?",
+            (result.capture_id,),
+        ).fetchone()
+    finally:
+        connection.close()
+    # FixedRandom().randint always returns 3 (the default escape_after),
+    # regardless of the (low, high) bounds it's called with.
+    assert (row["iv_hp"], row["iv_atk"], row["iv_def"], row["iv_spa"], row["iv_spd"]) == (
+        3,
+        3,
+        3,
+        3,
+        3,
+    )
+    assert row["iv_spe"] == 3
+    assert row["nature"] == "adamant"  # NATURES[3]
+    assert row["gender"] is None
+    assert row["ability"] is None
+
+
+class SequencedRandom:
+    """Replays fixed float/int sequences, one call at a time, to make the
+    fixed roll order (ivs, nature, gender, ability) observable in a test."""
+
+    def __init__(self, floats: list[float], ints: list[int]) -> None:
+        self._floats = list(floats)
+        self._ints = list(ints)
+
+    def random(self) -> float:
+        return self._floats.pop(0)
+
+    def randint(self, low: int, high: int) -> int:
+        value = self._ints.pop(0)
+        assert low <= value <= high
+        return value
+
+
+def test_success_persists_rolled_ivs_nature_gender_and_ability_in_fixed_order(
+    tmp_path: Path,
+) -> None:
+    rng = SequencedRandom(
+        floats=[0.0, 0.5],  # 1st: capture-check roll; 2nd: gender roll
+        ints=[1, 2, 3, 4, 5, 6, 7, 1],  # ivs (hp..spe), nature index, ability index
+    )
+    use_case, inventory_repository, encounter_repository = build_use_case(tmp_path, rng=rng)
+    seed(inventory_repository, encounter_repository)
+
+    result = use_case.execute(
+        replace(
+            command(),
+            gender_rate=1,  # threshold at roll < 1/8 = 0.125; 0.5 -> male
+            abilities=("static", "lightning-rod"),
+        )
+    )
+
+    connection = database.connect(tmp_path / "pokedex.db")
+    try:
+        row = connection.execute(
+            "SELECT iv_hp, iv_atk, iv_def, iv_spa, iv_spd, iv_spe, nature, gender, ability "
+            "FROM captures WHERE id = ?",
+            (result.capture_id,),
+        ).fetchone()
+    finally:
+        connection.close()
+    assert (row["iv_hp"], row["iv_atk"], row["iv_def"], row["iv_spa"], row["iv_spd"]) == (
+        1,
+        2,
+        3,
+        4,
+        5,
+    )
+    assert row["iv_spe"] == 6
+    assert row["nature"] == "relaxed"  # NATURES[7]
+    assert row["gender"] == "male"
+    assert row["ability"] == "lightning-rod"
+
+
 def test_failure_after_consumption_rolls_back_every_mutation(tmp_path: Path) -> None:
     class FailingCaptureRepository(SQLiteCaptureRepository):
         def insert(self, *args, **kwargs):

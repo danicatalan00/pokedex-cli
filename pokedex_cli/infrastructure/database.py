@@ -6,6 +6,8 @@ import sqlite3
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from pokedex_cli.domain.individuality import STAT_KEYS, derive_ivs_nature
+
 Migration = tuple[int, Callable[[sqlite3.Connection], None]]
 DEFAULT_BUSY_TIMEOUT_MS = 5_000
 
@@ -188,6 +190,50 @@ def _migration_006_team_limit(connection: sqlite3.Connection) -> None:
     )
 
 
+def _migration_007_individuality(connection: sqlite3.Connection) -> None:
+    capture_columns = _columns(connection, "captures")
+    capture_additions = {
+        "iv_hp": "INTEGER",
+        "iv_atk": "INTEGER",
+        "iv_def": "INTEGER",
+        "iv_spa": "INTEGER",
+        "iv_spd": "INTEGER",
+        "iv_spe": "INTEGER",
+        "nature": "TEXT",
+        "gender": "TEXT",
+        "ability": "TEXT",
+    }
+    for column, declaration in capture_additions.items():
+        if column not in capture_columns:
+            connection.execute(f"ALTER TABLE captures ADD COLUMN {column} {declaration}")
+
+    cache_columns = _columns(connection, "species_cache")
+    cache_additions = {
+        "gender_rate": "INTEGER",
+        "abilities": "TEXT",
+    }
+    for column, declaration in cache_additions.items():
+        if column not in cache_columns:
+            connection.execute(f"ALTER TABLE species_cache ADD COLUMN {column} {declaration}")
+
+    # Retroactive, deterministic individuality for captures that predate this
+    # migration: same capture id + caught_at always derives the same IVs and
+    # nature, so this is safe to run more than once. Gender and ability need
+    # species data (gender_rate/abilities) that may not be cached yet; those
+    # are filled lazily by application.individuality.BackfillIndividuality.
+    pending = connection.execute(
+        "SELECT id, caught_at FROM captures WHERE iv_hp IS NULL"
+    ).fetchall()
+    for row in pending:
+        capture_id, caught_at = row[0], row[1]
+        ivs, nature = derive_ivs_nature(f"{capture_id}:{caught_at}")
+        connection.execute(
+            "UPDATE captures SET iv_hp = ?, iv_atk = ?, iv_def = ?, iv_spa = ?, "
+            "iv_spd = ?, iv_spe = ?, nature = ? WHERE id = ?",
+            (*(ivs[key] for key in STAT_KEYS), nature.name, capture_id),
+        )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     (1, _migration_001_base_schema),
     (2, _migration_002_capture_rules),
@@ -195,6 +241,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     (4, _migration_004_inventory_and_activity),
     (5, _migration_005_encounters),
     (6, _migration_006_team_limit),
+    (7, _migration_007_individuality),
 )
 
 

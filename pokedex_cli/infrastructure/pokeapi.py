@@ -137,6 +137,7 @@ class PokeApiClient:
             "capture_rate": species_json["capture_rate"],
             "is_legendary": bool(species_json.get("is_legendary")),
             "is_mythical": bool(species_json.get("is_mythical")),
+            "gender_rate": species_json.get("gender_rate"),
             "generation": species_json.get("generation", {}).get("name"),
             "growth_rate": species_json.get("growth_rate", {}).get("name"),
             "level_evolutions": parsing._level_evolutions(

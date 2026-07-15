@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
 
 from pokedex_cli.application.evolutions import PendingEvolution
+from pokedex_cli.application.individuality import IncompleteCapture
 from pokedex_cli.application.species import SpeciesIdentity
 from pokedex_cli.application.training import TeamMember
 from pokedex_cli.domain.evolutions import EvolutionOption
@@ -297,12 +298,33 @@ class SQLiteCaptureRepository:
         caught_at: str,
         ball_slug: str,
         experience: int,
+        ivs: Mapping[str, int],
+        nature: str,
+        gender: str | None,
+        ability: str | None,
     ) -> int:
         cursor = connection.execute(
             "INSERT INTO captures "
-            "(species, form, shiny, caught_at, ball_slug, level, experience) "
-            "VALUES (?, ?, ?, ?, ?, 5, ?)",
-            (species, form, int(shiny), caught_at, ball_slug, experience),
+            "(species, form, shiny, caught_at, ball_slug, level, experience, "
+            "iv_hp, iv_atk, iv_def, iv_spa, iv_spd, iv_spe, nature, gender, ability) "
+            "VALUES (?, ?, ?, ?, ?, 5, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                species,
+                form,
+                int(shiny),
+                caught_at,
+                ball_slug,
+                experience,
+                ivs["hp"],
+                ivs["atk"],
+                ivs["def"],
+                ivs["spa"],
+                ivs["spd"],
+                ivs["spe"],
+                nature,
+                gender,
+                ability,
+            ),
         )
         if cursor.lastrowid is None:
             raise RuntimeError("capture insert did not return an id")
@@ -341,8 +363,9 @@ class SQLiteSpeciesCacheRepository:
                     (species, form, pokedex_id, capture_rate, types,
                      hp, atk, def, spa, spd, spe, is_legendary, is_mythical,
                      generation, flavor_text, form_data_exact, growth_rate,
-                     base_experience, level_evolutions, fetched_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     base_experience, level_evolutions, gender_rate, abilities,
+                     fetched_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(species, form) DO UPDATE SET
                     pokedex_id=excluded.pokedex_id,
                     capture_rate=excluded.capture_rate,
@@ -361,6 +384,8 @@ class SQLiteSpeciesCacheRepository:
                     growth_rate=excluded.growth_rate,
                     base_experience=excluded.base_experience,
                     level_evolutions=excluded.level_evolutions,
+                    gender_rate=excluded.gender_rate,
+                    abilities=excluded.abilities,
                     fetched_at=excluded.fetched_at
                 """,
                 (
@@ -383,6 +408,8 @@ class SQLiteSpeciesCacheRepository:
                     data.get("growth_rate"),
                     data.get("base_experience"),
                     json.dumps(data.get("level_evolutions", [])),
+                    data.get("gender_rate"),
+                    json.dumps(data.get("abilities", [])),
                     fetched_at,
                 ),
             )
@@ -443,7 +470,9 @@ class SQLiteCollectionRepository:
                        species_cache.flavor_text,
                        species_cache.form_data_exact,
                        species_cache.growth_rate,
-                       species_cache.base_experience
+                       species_cache.base_experience,
+                       species_cache.gender_rate,
+                       species_cache.abilities
                 FROM captures
                 LEFT JOIN species_cache
                   ON species_cache.species = captures.species
@@ -470,6 +499,8 @@ class SQLiteCollectionRepository:
                 form_data_exact=1,
                 growth_rate="medium",
                 base_experience=64,
+                gender_rate=None,
+                abilities=None,
             )
             return result
         try:
@@ -479,6 +510,7 @@ class SQLiteCollectionRepository:
         result["types"] = types if isinstance(types, list) else []
         result["growth_rate"] = result["growth_rate"] or "medium"
         result["base_experience"] = result["base_experience"] or 64
+        result["abilities"] = _decode_json_string_list(result["abilities"])
         return result
 
 
@@ -572,8 +604,11 @@ class SQLiteEvolutionRepository:
 
     @staticmethod
     def complete(connection: sqlite3.Connection, evolution: PendingEvolution) -> None:
+        # The ability is re-derived for the evolved species (same personality
+        # parity rule as the Gen 3 slot); gender never changes and is left
+        # untouched.
         connection.execute(
-            "UPDATE captures SET species = ?, form = ?, "
+            "UPDATE captures SET species = ?, form = ?, ability = NULL, "
             "pending_evolution_species = NULL, pending_evolution_form = NULL "
             "WHERE id = ? AND pending_evolution_species IS NOT NULL",
             (
@@ -630,3 +665,88 @@ class SQLiteEvolutionRepository:
             "pending_evolution_form = ? WHERE id = ?",
             (option.species, option.form, capture_id),
         )
+
+
+def _decode_json_string_list(payload: object) -> list[str]:
+    try:
+        parsed = json.loads(str(payload) if payload is not None else "[]")
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(item) for item in parsed]
+
+
+class SQLiteIndividualityRepository:
+    """Select captures missing individuality data and patch only what's missing."""
+
+    @staticmethod
+    def select_incomplete(connection: sqlite3.Connection) -> list[IncompleteCapture]:
+        rows = connection.execute(
+            """
+            SELECT captures.id AS id,
+                   captures.caught_at AS caught_at,
+                   captures.iv_hp AS iv_hp,
+                   captures.gender AS gender,
+                   captures.ability AS ability,
+                   species_cache.gender_rate AS gender_rate,
+                   species_cache.abilities AS abilities
+            FROM captures
+            LEFT JOIN species_cache
+              ON species_cache.species = captures.species
+             AND species_cache.form = captures.form
+            WHERE captures.iv_hp IS NULL
+               OR (captures.gender IS NULL AND species_cache.gender_rate IS NOT NULL)
+               OR (captures.ability IS NULL AND species_cache.abilities IS NOT NULL)
+            """
+        ).fetchall()
+        pending: list[IncompleteCapture] = []
+        for row in rows:
+            abilities = _decode_json_string_list(row["abilities"])
+            needs_ivs = row["iv_hp"] is None
+            needs_gender = row["gender"] is None and row["gender_rate"] is not None
+            needs_ability = row["ability"] is None and bool(abilities)
+            if not (needs_ivs or needs_gender or needs_ability):
+                continue
+            pending.append(
+                IncompleteCapture(
+                    id=int(row["id"]),
+                    caught_at=str(row["caught_at"]),
+                    needs_ivs=needs_ivs,
+                    needs_gender=needs_gender,
+                    needs_ability=needs_ability,
+                    gender_rate=row["gender_rate"],
+                    abilities=abilities,
+                )
+            )
+        return pending
+
+    @staticmethod
+    def update_ivs_and_nature(
+        connection: sqlite3.Connection,
+        capture_id: int,
+        ivs: Mapping[str, int],
+        nature: str,
+    ) -> None:
+        connection.execute(
+            "UPDATE captures SET iv_hp = ?, iv_atk = ?, iv_def = ?, iv_spa = ?, "
+            "iv_spd = ?, iv_spe = ?, nature = ? WHERE id = ?",
+            (
+                ivs["hp"],
+                ivs["atk"],
+                ivs["def"],
+                ivs["spa"],
+                ivs["spd"],
+                ivs["spe"],
+                nature,
+                capture_id,
+            ),
+        )
+
+    @staticmethod
+    def update_gender(connection: sqlite3.Connection, capture_id: int, gender: str) -> None:
+        connection.execute("UPDATE captures SET gender = ? WHERE id = ?", (gender, capture_id))
+
+    @staticmethod
+    def update_ability(connection: sqlite3.Connection, capture_id: int, ability: str) -> None:
+        connection.execute("UPDATE captures SET ability = ? WHERE id = ?", (ability, capture_id))

@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from pokedex_cli import cli, storage
+from pokedex_cli.domain.individuality import STAT_KEYS, compute_stats, derive_ivs_nature
 
 
 def species_data(**overrides):
@@ -124,8 +125,8 @@ def test_vision_enriches_offline_capture_then_renders_sprite(connection, monkeyp
     capture_id = add_capture(connection)
     use_case = MagicMock()
 
-    def enrich(species, form):
-        cache(connection, species, form)
+    def enrich(species, form, refresh=False):
+        cache(connection, species, form, gender_rate=4, abilities=["static"])
         return dict(storage.get_species_cache(connection, species, form))
 
     use_case.execute.side_effect = enrich
@@ -180,6 +181,18 @@ def test_type_ranking_and_rare_queries_prepare_expected_rows(connection, monkeyp
     assert type_render.call_args.args[1] == {"electric": 1, "psychic": 1}
     ranked, missing = ranking_render.call_args.args[1:]
     assert [row["species"] for row in ranked] == ["mew", "pikachu"]
-    assert [row["total"] for row in ranked] == [600, 21]
+    # Ranking now orders by ACTUAL stats at level (Gen 3 formula), not the
+    # base sum: derive the same IVs/nature the collection query would, as an
+    # independent oracle (this isn't re-testing the formula, just the wiring).
+    pikachu_bases = {"hp": 1, "atk": 2, "def": 3, "spa": 4, "spd": 5, "spe": 6}
+    mew_bases = {key: 100 for key in STAT_KEYS}
+    expected_totals = {}
+    for row in ranked:
+        bases = mew_bases if row["species"] == "mew" else pikachu_bases
+        ivs, nature = derive_ivs_nature(f"{row['id']}:{row['caught_at']}")
+        stats = compute_stats(bases, ivs, row["level"], nature)
+        expected_totals[row["species"]] = sum(stats.values())
+    assert [row["total"] for row in ranked] == [expected_totals[row["species"]] for row in ranked]
+    assert [row["base_total"] for row in ranked] == [600, 21]
     assert missing == 0
     assert [row["species"] for row in rare_render.call_args.args[1]] == ["mew"]
