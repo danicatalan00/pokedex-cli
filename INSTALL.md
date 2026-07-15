@@ -1,174 +1,213 @@
-# INSTALL.md - instalacion agentica de pokedex-cli
+# Instalación asistida por un agente de código
 
-Este documento esta escrito para un agente de codigo que deba instalar `pokedex-cli` de forma plug and play en una maquina Linux/WSL, haciendo automaticamente todo lo que no requiera `sudo` y entregando al usuario los comandos que si requieren privilegios.
+Esta es la vía *lazy* para instalar o actualizar `pokedex-cli` en Linux o WSL.
+Está escrita para un agente con acceso al proyecto y a la máquina donde se va a
+usar: el agente inspecciona ambos, ejecuta todo lo que pueda sin privilegios,
+pide al usuario únicamente las acciones que requieran `sudo` y deja `pokedex`
+listo y comprobado.
 
-## Objetivo
+No sigas esta guía como una receta ciega. El repositorio y el entorno real son
+la fuente de verdad. Lee al menos `AGENTS.md`, `pyproject.toml`, `install.sh` y
+`docs/installation.md` antes de actuar, y adapta los comandos al sistema y al
+gestor de paquetes encontrados.
 
-Instalar una CLI llamada `pokedex` que:
+## Resultado esperado
 
-- crea un entorno virtual local en el proyecto;
-- usa `rich` y `requests` disponibles en el sistema;
-- crea el ejecutable `~/bin/pokedex`;
-- configura autocompletado zsh;
-- guarda datos en `~/.local/share/pokedex-cli`;
-- se integra opcionalmente con `krabby` para mostrar y capturar Pokemon al abrir terminales.
+Una instalación correcta deja:
 
-## Requisitos
+- una copia estable y no editable en
+  `${XDG_DATA_HOME:-$HOME/.local/share}/pokedex-cli/venv`;
+- el estado SQLite, que debe conservarse en una actualización, bajo el mismo
+  directorio de datos;
+- el ejecutable `~/bin/pokedex`;
+- el completado en `~/.zfunc/_pokedex` y su configuración en `~/.zshrc`;
+- opcionalmente, Krabby en `PATH` para mostrar sprites y encuentros.
 
-Obligatorios:
+El checkout no forma parte de la instalación efectiva. Puede moverse o
+eliminarse después de instalar sin romper `pokedex`.
 
-- Linux o WSL.
-- `bash`.
-- `python3`.
-- modulo `venv` para Python.
-- paquetes Python importables desde sistema: `rich` y `requests`.
-- `zsh` si se quiere autocompletado y hook al abrir terminal.
+## Contrato del agente instalador
 
-Recomendado para la experiencia completa:
+1. No uses `sudo`, no cambies el shell por defecto y no instales software global
+   sin aprobación explícita.
+2. Detecta si se trata de una primera instalación o de una actualización. No
+   borres el entorno estable, `pokedex.db`, una `.zshrc` existente ni otro estado
+   del usuario para «empezar limpio».
+3. Inspecciona versiones, rutas, permisos, distribución y gestor de paquetes.
+   Comprueba con el mismo `python3` que invocará `install.sh`.
+4. Ejecuta directamente todas las acciones reversibles que no necesiten
+   privilegios. Si falta un paquete del sistema, explica el diagnóstico y pide
+   al usuario que ejecute solo el comando privilegiado necesario.
+5. Después de que el usuario resuelva un requisito, vuelve a comprobarlo y
+   continúa hasta completar la instalación; no te limites a entregar una lista
+   de comandos.
+6. Usa `./install.sh` siempre que funcione, pero no quedes bloqueado por él:
+   diagnostica el paso exacto, corrígelo o reprodúcelo manualmente respetando las
+   rutas y el modelo de instalación actuales, y deja constancia de la desviación.
+7. Verifica la copia instalada desde fuera del repositorio. No des por buena una
+   importación que pueda estar resolviendo el checkout.
 
-- `krabby` disponible en `PATH`.
-- `~/.zshrc` editable por el usuario/agente.
-- `~/bin` en `PATH`.
+## Inspección inicial
 
-## Reglas para el agente instalador
-
-1. No ejecutes `sudo` automaticamente.
-2. Primero revisa requisitos con los comandos de diagnostico.
-3. Si falta algo que requiere privilegios, muestra al usuario el bloque exacto de comandos de la seccion "Comandos que requieren sudo".
-4. Si no falta nada critico, ejecuta la seccion "Instalacion sin sudo".
-5. Al final, verifica con `pokedex --help` y, si existe `krabby`, con `pokedex demo pikachu -r catch`.
-
-## Diagnostico inicial
-
-Ejecuta estos comandos desde la raiz del proyecto:
+Desde la raíz del proyecto, recoge primero el estado sin modificarlo:
 
 ```bash
 pwd
-test -f install.sh && echo "OK install.sh encontrado"
-command -v bash
-command -v python3
-python3 --version
-python3 -m venv --help >/dev/null && echo "OK python venv disponible"
-python3 -c "import rich; print('OK rich', rich.__version__)"
-python3 -c "import requests; print('OK requests', requests.__version__)"
+git status --short 2>/dev/null || true
+sed -n '1,220p' AGENTS.md
+sed -n '1,220p' pyproject.toml
+sed -n '1,260p' install.sh
+
+printf 'HOME=%s\nXDG_DATA_HOME=%s\nSHELL=%s\n' \
+  "$HOME" "${XDG_DATA_HOME:-}" "${SHELL:-}"
+command -v python3 || true
+python3 --version 2>&1 || true
+python3 -m venv --help >/dev/null 2>&1 && echo 'venv: OK' || echo 'venv: falta'
+python3 -c 'import rich, requests; print("dependencias Python: OK")' 2>&1 || true
+command -v bash || true
 command -v zsh || true
 command -v krabby || true
-printf '%s\n' "$PATH" | tr ':' '\n' | grep -Fx "$HOME/bin" || true
+command -v pokedex || true
+test -x "$HOME/bin/pokedex" && "$HOME/bin/pokedex" --help >/dev/null && \
+  echo 'instalación anterior: utilizable' || true
 ```
 
-Interpretacion:
+Comprueba además que el Python sea 3.11–3.13, que `$HOME` y las rutas XDG sean
+escribibles y que haya espacio suficiente. Si ya existe una instalación, anota
+su ruta efectiva antes de actualizar:
 
-- Si falla `command -v python3`, falta Python.
-- Si falla `python3 -m venv --help`, falta el paquete de venv.
-- Si falla `import rich` o `import requests`, faltan paquetes Python del sistema.
-- Si `command -v krabby` no devuelve ruta, la CLI puede instalarse, pero el hook visual completo no funcionara hasta instalar `krabby`.
-- Si `~/bin` no aparece en `PATH`, el instalador creara `~/bin/pokedex`, pero el usuario podria necesitar abrir una terminal nueva o ajustar su shell.
+```bash
+(cd /tmp && "$HOME/bin/pokedex" --help >/dev/null)
+```
 
-## Comandos que requieren sudo
+La ausencia de Zsh impide validar su completado, pero no la CLI. La ausencia de
+Krabby permite instalar y usar las funciones que no requieren sprites; debe
+presentarse como una mejora opcional, no como un fallo de instalación.
 
-Si faltan Python, venv, `rich` o `requests` en Debian/Ubuntu/WSL, entrega al usuario estos comandos, linea por linea:
+## Resolver requisitos
+
+Requisitos base: Linux/WSL, Bash, Python 3.11–3.13 con `venv`, y `rich`
+13.7–15 y `requests` 2.x importables por el Python del sistema. Zsh es necesario
+para el completado y el hook documentados.
+
+Antes de pedir `sudo`, detecta la distribución (`/etc/os-release`) y las
+herramientas disponibles. En Debian, Ubuntu o WSL basado en ellas, un bloque
+habitual es:
 
 ```bash
 sudo apt update
 sudo apt install -y python3 python3-venv python3-rich python3-requests zsh
 ```
 
-Si falta `krabby` y el usuario quiere la experiencia completa, entrega estos comandos. Requieren Rust/Cargo; instala Rust solo si `cargo` no existe:
+No pidas instalar todo el bloque si solo falta una pieza. En otra distribución,
+usa los nombres y el gestor nativos. No intentes sustituir silenciosamente un
+Python incompatible ni recurras a `pip` global. Si los paquetes de la
+distribución no satisfacen los rangos de `pyproject.toml`, elige una solución
+local compatible y comprueba que el entorno estable puede importarla.
 
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-Despues de instalar Rust, el usuario debe abrir una terminal nueva o ejecutar:
-
-```bash
-. "$HOME/.cargo/env"
-```
-
-Luego instalar `krabby` sin sudo:
+Krabby es opcional. Si el usuario quiere la experiencia visual, prefiere el
+método de instalación vigente para su plataforma. Si se usa Cargo y ya está
+disponible, normalmente basta con una acción sin `sudo`:
 
 ```bash
 cargo install krabby
 ```
 
-Nota: `cargo install krabby` no requiere `sudo`, pero puede tardar y necesita red.
+Instalar Rust, modificar perfiles del shell o descargar un instalador remoto
+requiere explicarlo y obtener aprobación antes. Tras cualquier intervención del
+usuario, repite únicamente los diagnósticos que fallaban.
 
-## Instalacion sin sudo
+## Instalar o actualizar
 
-Desde la raiz del proyecto:
+Con los requisitos satisfechos, desde la raíz del checkout:
 
 ```bash
 chmod +x install.sh
 ./install.sh
 ```
 
-El script es idempotente. Hace lo siguiente:
+El script crea una wheel e instala/actualiza una copia estable con
+`--system-site-packages`; no crea una `.venv` dentro del proyecto. También crea
+el shim, actualiza el completado, integra `~/.zfunc` en Zsh de forma idempotente
+e invalida dumps antiguos de completado.
 
-- crea `.venv` dentro del proyecto con `--system-site-packages`;
-- comprueba que `rich` y `requests` se puedan importar;
-- crea `~/.local/share/pokedex-cli`;
-- crea o actualiza `~/bin/pokedex`;
-- copia autocompletado a `~/.zfunc/_pokedex`;
-- anade un bloque de autocompletado a `~/.zshrc` si aun no existe.
+Si `~/bin` no está en `PATH`, añade una línea equivalente al archivo de inicio
+del shell que use realmente el usuario, sin duplicarla. Para Zsh:
 
-Si `~/bin` no esta en `PATH`, anade esto al shell correspondiente. Para zsh:
-
-```bash
-grep -qxF 'export PATH="$HOME/bin:$PATH"' ~/.zshrc || printf '\nexport PATH="$HOME/bin:$PATH"\n' >> ~/.zshrc
+```zsh
+export PATH="$HOME/bin:$PATH"
 ```
 
-Aplicar cambios de zsh en la sesion actual:
+No ejecutes `source ~/.zshrc` a ciegas: puede contener efectos interactivos.
+Valida su sintaxis y prueba en un proceso Zsh nuevo.
 
-```bash
-source ~/.zshrc
-```
+Para habilitar encuentros al abrir una terminal, añade el bloque solo si el
+usuario lo quiere y colócalo en la parte interactiva de `~/.zshrc`:
 
-## Hook opcional al abrir terminal
-
-Para que aparezca un Pokemon al abrir una terminal zsh, el agente puede anadir este bloque a `~/.zshrc` solo si `pokedex` y `krabby` existen:
-
-```bash
-if command -v pokedex >/dev/null 2>&1 && command -v krabby >/dev/null 2>&1; then
-    pokedex hook 1-9
+```zsh
+if command -v pokedex >/dev/null 2>&1; then
+    pokedex hook 1-3
+elif command -v krabby >/dev/null 2>&1; then
+    krabby random 1-3 --no-title -i
 fi
 ```
 
-Para limitar generaciones, cambia `1-9` por valores como `1-3` o `1,2,5`.
+`pokedex hook` está diseñado para degradar sin romper el prompt si Krabby, la
+red u otro recurso recuperable no están disponibles.
 
-## Verificacion
+## Verificación obligatoria
 
-Ejecuta:
-
-```bash
-command -v pokedex
-pokedex --help
-pokedex search pikachu
-```
-
-Si `krabby` esta instalado:
+Haz las comprobaciones finales contra la instalación estable y desde `/tmp`:
 
 ```bash
-pokedex demo pikachu -r catch
-pokedex hook 1-3
-pokedex ver
+(cd /tmp && "$HOME/bin/pokedex" --help >/dev/null)
+(cd /tmp && "${XDG_DATA_HOME:-$HOME/.local/share}/pokedex-cli/venv/bin/python" \
+  -c 'import pokedex_cli; print(pokedex_cli.__file__)')
+zsh -n "$HOME/.zshrc"
+git diff --check
 ```
 
-## Desinstalacion
+La ruta impresa debe estar en `site-packages/pokedex_cli`, no en el checkout.
+Si Zsh no está instalado o no existe `~/.zshrc`, informa de esa única
+verificación pendiente en vez de fingir que se ejecutó. Comprueba también que
+un Zsh nuevo encuentra `pokedex` cuando hayas cambiado `PATH`.
 
-No requiere sudo:
+Con Krabby disponible se puede hacer una prueba visual no destructiva:
 
 ```bash
-rm -f "$HOME/bin/pokedex"
-rm -f "$HOME/.zfunc/_pokedex"
-rm -rf "$HOME/.local/share/pokedex-cli"
+(cd /tmp && "$HOME/bin/pokedex" demo pikachu -r catch)
 ```
 
-Despues elimina manualmente de `~/.zshrc` los bloques relacionados con `pokedex-cli` si ya no se quieren.
+No uses `search`, `hook`, captura ni otras operaciones con red o estado como
+única prueba de instalación. Si fallan, separa un problema de instalación de
+una indisponibilidad opcional de Krabby o de la red.
 
-## Solucion de problemas
+No termines con el checkout más nuevo que la copia instalada: si modificaste el
+proyecto durante la reparación, vuelve a ejecutar `./install.sh` y repite estas
+comprobaciones.
 
-- `install.sh: falta rich/requests`: instala `python3-rich` y `python3-requests` con apt usando los comandos de sudo anteriores.
-- `pokedex: no se encontro el entorno virtual`: el proyecto se movio o borro; vuelve a ejecutar `./install.sh` desde la nueva ruta.
-- `No hay ningun Pokemon a la vista`: ejecuta `pokedex hook 1-9` o abre una terminal nueva con el hook configurado.
-- El hook no pinta nada: comprueba `command -v krabby` y que `krabby random 1-3 --no-title -i` funcione.
-- No hay autocompletado: abre una terminal zsh nueva o ejecuta `source ~/.zshrc`.
+## Recuperación manual
+
+Si `install.sh` falla, conserva su salida y localiza primero la frontera:
+creación del venv, construcción/instalación de la wheel, importación de
+dependencias, escritura del shim o edición de Zsh. Corrige solo esa frontera.
+Puedes crear el entorno estable, instalar la wheel, copiar el completado o
+reparar el bloque de Zsh manualmente, pero mantén los artefactos y rutas de
+«Resultado esperado» y vuelve a ejecutar las verificaciones completas.
+
+Casos frecuentes:
+
+- Un entorno estable antiguo o roto puede requerir reconstrucción, pero mueve o
+  respalda primero el venv y no toques `pokedex.db`.
+- Un `pokedex` encontrado en otra ruta no valida `~/bin/pokedex`; prueba el shim
+  explícitamente.
+- Un error de importación desde la raíz puede quedar oculto por el checkout;
+  reproduce siempre desde `/tmp`.
+- Si la edición automática de `.zshrc` no encaja con su estructura, haz una
+  modificación mínima, conserva el contenido existente y exige `zsh -n`.
+- Si hay cambios locales en el repositorio, no los descartes ni sobrescribas;
+  instala el estado que el usuario pidió y explica qué versión quedó efectiva.
+
+La desinstalación y el borrado de datos son operaciones distintas y quedan
+fuera de este flujo: nunca elimines el estado del usuario como parte de una
+instalación o actualización.
