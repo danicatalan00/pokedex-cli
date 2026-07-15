@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -50,6 +51,7 @@ def run_cli(environment: dict[str, str], *args: str) -> subprocess.CompletedProc
         cwd=PROJECT_ROOT,
         env=environment,
         capture_output=True,
+        input="",
         text=True,
         timeout=15,
     )
@@ -151,6 +153,52 @@ def test_corrupt_database_fails_cleanly(tmp_path: Path) -> None:
     assert result.returncode == 1
     assert "Traceback" not in result.stderr
     assert "database" in result.stderr.lower()
+
+
+def test_version_one_database_is_upgraded_by_the_real_cli(tmp_path: Path) -> None:
+    environment = isolated_environment(tmp_path)
+    path = database_path(environment)
+    path.parent.mkdir(parents=True)
+    old = sqlite3.connect(path)
+    database.migrate(old, database.MIGRATIONS[:1])
+    old.execute(
+        "INSERT INTO captures (species, form, shiny, caught_at) "
+        "VALUES ('pikachu', 'regular', 0, '2026-07-15')"
+    )
+    old.commit()
+    old.close()
+
+    result = run_cli(environment, "list")
+
+    assert result.returncode == 0
+    assert "Pikachu" in result.stdout
+    upgraded = database.connect(path)
+    try:
+        assert upgraded.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 6
+    finally:
+        upgraded.close()
+
+
+def test_non_tty_team_selector_cancels_cleanly_on_eof(tmp_path: Path) -> None:
+    environment = isolated_environment(tmp_path)
+    connection = database.connect(database_path(environment))
+    try:
+        capture_id = storage.insert_capture(connection, "pikachu", "regular", False, "now")
+    finally:
+        connection.close()
+
+    result = run_cli(environment, "equipo", "add")
+
+    assert result.returncode == 0
+    assert "Traceback" not in result.stderr
+    check = database.connect(database_path(environment))
+    try:
+        assert (
+            check.execute("SELECT in_team FROM captures WHERE id = ?", (capture_id,)).fetchone()[0]
+            == 0
+        )
+    finally:
+        check.close()
 
 
 def test_offline_capture_success_and_failure_are_persisted_atomically(tmp_path: Path) -> None:

@@ -578,9 +578,7 @@ def play_evolution_animation(
     new_name = new_species.replace("-", " ").title()
     console.print(f"\n[bold yellow]¿Qué? ¡{old_name} está evolucionando![/]")
     if not console.is_terminal:
-        console.print(
-            f"[bold green]¡Enhorabuena! ¡{old_name} ha evolucionado a {new_name}![/]"
-        )
+        console.print(f"[bold green]¡Enhorabuena! ¡{old_name} ha evolucionado a {new_name}![/]")
         return
     try:
         old_sprite = (
