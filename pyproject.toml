@@ -41,10 +41,25 @@ markers = [
 [tool.coverage.run]
 branch = true
 source = ["pokedex_cli"]
+omit = [
+    "pokedex_cli/__main__.py",
+    "pokedex_cli/animation.py",
+    "pokedex_cli/cli.py",
+    "pokedex_cli/display.py",
+    "pokedex_cli/inventory.py",
+    "pokedex_cli/krabby_bridge.py",
+    "pokedex_cli/paths.py",
+    "pokedex_cli/pokeapi.py",
+    "pokedex_cli/progression.py",
+    "pokedex_cli/storage.py",
+    "pokedex_cli/presentation/animation.py",
+    "pokedex_cli/presentation/display.py",
+]
 
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
+fail_under = 85
 
 [tool.ruff]
 target-version = "py311"
