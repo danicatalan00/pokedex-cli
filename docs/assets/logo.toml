@@ -1,6 +1,6 @@
 [logo]
-pokemon = "charizard"
-form = "mega-x"
-shiny = false
+pokemon = "mewtwo"
+form = "regular"
+shiny = true
 title = "POKÉDEX CLI"
 tagline = "catch · train · evolve"
