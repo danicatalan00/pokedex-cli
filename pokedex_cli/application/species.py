@@ -6,6 +6,8 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
+from pokedex_cli.domain.identity import normalize_form, normalize_species
+
 SpeciesData = dict[str, Any]
 
 
@@ -38,6 +40,8 @@ class GetSpeciesData:
         self._clock = clock
 
     def execute(self, species: str, form: str, *, refresh: bool = False) -> SpeciesData | None:
+        species = normalize_species(species)
+        form = normalize_form(form)
         if not refresh:
             cached = self._cache.get(species, form)
             if cached is not None:

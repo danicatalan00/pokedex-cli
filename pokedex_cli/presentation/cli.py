@@ -1,7 +1,6 @@
 import argparse
 import os
 import select
-import sqlite3
 import sys
 import termios
 import tty
@@ -820,17 +819,18 @@ def main() -> int:
     args = parser.parse_args()
     try:
         return args.func(args)
-    except (sqlite3.Error, OSError) as error:
+    except Exception as error:
+        if not composition.is_recoverable_failure(error) and args.command != "hook":
+            raise
         composition.record_failure(f"command {args.command}", error)
         prefix = "pokedex hook" if args.command == "hook" else "pokedex"
-        print(f"{prefix}: error recuperable: {error}", file=sys.stderr)
+        detail = (
+            f"error recuperable: {error}"
+            if composition.is_recoverable_failure(error)
+            else str(error)
+        )
+        print(f"{prefix}: {detail}", file=sys.stderr)
         return 0 if args.command == "hook" else 1
-    except Exception as error:
-        if args.command != "hook":
-            raise
-        composition.record_failure("command hook", error)
-        print(f"pokedex hook: {error}", file=sys.stderr)
-        return 0
 
 
 if __name__ == "__main__":

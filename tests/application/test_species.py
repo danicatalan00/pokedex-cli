@@ -52,6 +52,19 @@ def test_cache_miss_fetches_persists_and_returns_canonical_cached_value():
     assert result == {**payload, "fetched_at": NOW.isoformat()}
 
 
+def test_normalizes_species_and_form_before_cache_and_api_lookup():
+    cache = Cache()
+    api = Api({"name": "charizard-mega-x"})
+
+    result = GetSpeciesData(cache=cache, api=api, clock=lambda: NOW).execute(
+        " Charizárd ", "Mega X"
+    )
+
+    assert api.calls == [("charizard", "mega-x")]
+    assert cache.saved[0][:2] == ("charizard", "mega-x")
+    assert result is not None
+
+
 def test_offline_miss_is_a_stable_none_and_does_not_poison_cache():
     cache = Cache()
     api = Api(None)

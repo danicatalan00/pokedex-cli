@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+import sqlite3
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -139,3 +140,8 @@ def completion_file(shell: str) -> Path:
 
 def record_failure(context: str, error: BaseException) -> None:
     log_failure(context, error)
+
+
+def is_recoverable_failure(error: BaseException) -> bool:
+    """Classify infrastructure failures without leaking its types into presentation."""
+    return isinstance(error, (sqlite3.Error, OSError))

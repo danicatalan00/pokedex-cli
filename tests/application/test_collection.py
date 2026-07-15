@@ -66,6 +66,12 @@ def test_resolve_supports_id_latest_name_and_form():
     assert service.resolve("missing", None) is None
 
 
+def test_resolve_normalizes_user_facing_species_and_form():
+    service = CollectionQueries(Repository([row(1, "mr-mime", form="mega-x")]))
+
+    assert service.resolve(" Mr. Mime ", "Mega X")["id"] == 1
+
+
 def test_team_available_types_ranking_and_rare_views_are_prepared():
     service = queries()
     assert [item["id"] for item in service.team()] == [3]

@@ -5,12 +5,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from pokedex_cli.domain.identity import normalize_form, normalize_species
+
 
 @dataclass(frozen=True)
 class Pokemon:
     species: str
     form: str = "regular"
     shiny: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "species", normalize_species(self.species))
+        object.__setattr__(self, "form", normalize_form(self.form))
 
 
 @dataclass(frozen=True)
@@ -69,13 +75,11 @@ class Encounter:
             return None
         if escape_after is not None and escape_after <= 0:
             return None
-        return cls(
-            Pokemon(species, form, bool(raw.get("shiny", False))),
-            seen_at,
-            bool(raw.get("captured", False)),
-            failed,
-            escape_after,
-        )
+        try:
+            pokemon = Pokemon(species, form, bool(raw.get("shiny", False)))
+        except ValueError:
+            return None
+        return cls(pokemon, seen_at, bool(raw.get("captured", False)), failed, escape_after)
 
 
 @dataclass(frozen=True)

@@ -5,6 +5,7 @@ import sqlite3
 import sys
 import unittest
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from pokedex_cli import cli, inventory, storage
@@ -258,6 +259,10 @@ class HookFailureBoundaryTests(unittest.TestCase):
         self.assertIn("corrupt", stderr.getvalue())
         self.assertNotIn("Traceback", stderr.getvalue())
         self.assertEqual(record_failure.call_args.args[0], "command bolsas")
+
+    def test_presentation_does_not_import_the_storage_engine(self):
+        source = Path(cli.main.__code__.co_filename).read_text()
+        self.assertNotIn("import sqlite3", source)
 
 
 if __name__ == "__main__":

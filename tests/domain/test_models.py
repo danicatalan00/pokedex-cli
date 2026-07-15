@@ -4,11 +4,16 @@ from hypothesis import strategies as st
 from pokedex_cli.domain.models import Encounter, Pokemon
 
 safe_text = st.text(alphabet=st.characters(blacklist_categories=("Cs",)), min_size=1, max_size=30)
+identity_text = st.text(
+    alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+    min_size=1,
+    max_size=30,
+)
 
 
 @given(
-    species=safe_text,
-    form=safe_text,
+    species=identity_text,
+    form=identity_text,
     shiny=st.booleans(),
     seen_at=safe_text,
     captured=st.booleans(),
@@ -36,3 +41,7 @@ def test_encounter_serialization_round_trip(
 
 def test_encounter_rejects_missing_identity_fields() -> None:
     assert Encounter.from_dict({"species": "pikachu"}) is None
+
+
+def test_pokemon_stores_normalized_identity() -> None:
+    assert Pokemon(" Mr. Mime ", "Mega X") == Pokemon("mr-mime", "mega-x")

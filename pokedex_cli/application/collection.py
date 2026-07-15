@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+from pokedex_cli.domain.identity import normalize_form, normalize_species
 from pokedex_cli.domain.progression import (
     MAX_LEVEL,
     STARTING_LEVEL,
@@ -44,12 +45,14 @@ class CollectionQueries:
         if identifier.isdigit():
             capture_id = int(identifier)
             return next((row for row in rows if int(row["id"]) == capture_id), None)
-        species = identifier.lower()
+        species = normalize_species(identifier)
+        canonical_form = normalize_form(form) if form is not None else None
         return next(
             (
                 row
                 for row in rows
-                if row["species"] == species and (form is None or row["form"] == form)
+                if row["species"] == species
+                and (canonical_form is None or row["form"] == canonical_form)
             ),
             None,
         )
