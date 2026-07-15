@@ -66,5 +66,6 @@ La [documentación del proyecto](docs/README.md) está organizada por propósito
 - entender: [arquitectura](docs/architecture.md),
   [modelo de datos](docs/data-model.md) e [infraestructura](docs/infrastructure.md).
 
-El sprite de cabecera es Rotom renderizado a partir del arte terminal de
-[Krabby](https://github.com/yannjor/krabby).
+El sprite de cabecera se genera a partir del arte terminal de
+[Krabby](https://github.com/yannjor/krabby) y se puede
+[cambiar por cualquier nombre o forma](docs/logo.md).

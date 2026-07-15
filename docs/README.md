@@ -7,6 +7,7 @@ solo cuando hace falta.
 ## Quiero hacer algo
 
 - [Instalar, actualizar y activar el hook](installation.md)
+- [Cambiar el Pokémon del logo](logo.md)
 - [Escribir y ejecutar tests](testing.md)
 - [Elegir los gates de un cambio](change-gates.md)
 - [Hacer backup, diagnosticar o recuperar datos](operations.md)

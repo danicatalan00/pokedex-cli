@@ -1,0 +1,6 @@
+[logo]
+pokemon = "rotom"
+form = "regular"
+shiny = false
+title = "POKÉDEX CLI"
+tagline = "catch · train · evolve"
