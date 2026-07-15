@@ -28,9 +28,7 @@ class ExperienceCurveTests(unittest.TestCase):
         self.assertEqual(progression.commit_difficulty(0), 1.0)
         self.assertEqual(progression.commit_difficulty(100), 3.0)
         self.assertEqual(progression.commit_difficulty(2688), 50.0)
-        self.assertEqual(
-            progression.commit_experience(5, 64, 2688), 45 * 50
-        )
+        self.assertEqual(progression.commit_experience(5, 64, 2688), 45 * 50)
         total = progression.experience_for_level("medium-slow", 5) + 45 * 50
         self.assertEqual(progression.level_for_experience("medium-slow", total), 15)
 
@@ -45,7 +43,9 @@ class CommitTrainingTests(unittest.TestCase):
             "(species, form, growth_rate, base_experience, level_evolutions, fetched_at) "
             "VALUES (?, 'regular', ?, ?, ?, 'now')",
             (
-                "bulbasaur", "medium-slow", 64,
+                "bulbasaur",
+                "medium-slow",
+                64,
                 json.dumps([{"species": "ivysaur", "form": "regular", "min_level": 16}]),
             ),
         )
@@ -62,9 +62,7 @@ class CommitTrainingTests(unittest.TestCase):
         self.conn.close()
 
     def test_commits_gain_experience_and_queue_level_evolution(self):
-        results = progression.apply_commit_experience(
-            self.conn, 4, rng=random.Random(7)
-        )
+        results = progression.apply_commit_experience(self.conn, 4, rng=random.Random(7))
         pokemon = self.conn.execute("SELECT * FROM captures").fetchone()
         self.assertEqual(results[0].experience, 4 * progression.commit_experience(15, 64))
         self.assertEqual(pokemon["level"], 16)

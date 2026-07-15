@@ -5,6 +5,26 @@ from pokedex_cli import animation
 
 
 class BallAnimationTests(unittest.TestCase):
+    def test_public_frame_generation_has_stable_dimensions_and_final_click(self):
+        sprite = "\x1b[38;2;100;200;100mP\x1b[0m"
+        frames = animation.generate_capture_frames(
+            sprite, caught=True, ball_slug="ultraball", rng=random.Random(1)
+        )
+        dimensions = {
+            (len(frame.plain.splitlines()), max(map(len, frame.plain.splitlines())))
+            for frame, _ in frames
+        }
+        self.assertEqual(len(dimensions), 1)
+        self.assertNotIn("P", frames[-1][0].plain)
+        self.assertIn("●", frames[-1][0].plain)
+
+    def test_public_frame_generation_falls_back_without_sprite(self):
+        frames = animation.generate_capture_frames(
+            None, caught=False, ball_slug="pokeball", rng=random.Random(1)
+        )
+        self.assertGreater(len(frames), 1)
+        self.assertIn("se soltó", frames[-1][0].plain)
+
     def test_effects_grow_with_ball_tier(self):
         grid = [[animation.Cell() for _ in range(25)] for _ in range(12)]
         grid[5][12] = animation.Cell("P", (100, 200, 100))
@@ -13,9 +33,7 @@ class BallAnimationTests(unittest.TestCase):
         for slug in ("pokeball", "superball", "ultraball", "masterball"):
             style = animation._ball_style(slug)
             frames = list(
-                animation._frames_composited(
-                    grid, caught=True, rng=random.Random(1), style=style
-                )
+                animation._frames_composited(grid, caught=True, rng=random.Random(1), style=style)
             )
             frame_counts.append(len(frames))
 
@@ -31,9 +49,7 @@ class BallAnimationTests(unittest.TestCase):
         self.assertEqual(len({style.pattern for style in styles}), 4)
 
     def test_unknown_ball_falls_back_to_basic_ball(self):
-        self.assertEqual(
-            animation._ball_style("inventada"), animation._ball_style("pokeball")
-        )
+        self.assertEqual(animation._ball_style("inventada"), animation._ball_style("pokeball"))
 
     def test_ball_uses_compact_block_footprint(self):
         grid = [[animation.Cell() for _ in range(11)] for _ in range(6)]
@@ -63,6 +79,17 @@ class BallAnimationTests(unittest.TestCase):
         self.assertIn("A", rendered[0])
         self.assertIn("B", rendered[-1])
         self.assertTrue(all(delay > 0 for _, delay in frames))
+
+    def test_public_evolution_frames_fit_different_sprite_sizes(self):
+        old_sprite = "A"
+        new_sprite = "BB\nBB\nBB"
+        frames = animation.generate_evolution_frames(old_sprite, new_sprite, speed=0.5)
+        dimensions = {
+            (len(frame.plain.splitlines()), max(map(len, frame.plain.splitlines())))
+            for frame, _ in frames
+        }
+        self.assertEqual(len(dimensions), 1)
+        self.assertIn("BB", frames[-1][0].plain)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,8 @@
 import argparse
+import contextlib
+import io
 import sqlite3
+import sys
 import unittest
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
@@ -19,6 +22,11 @@ class BallSelectionTests(unittest.TestCase):
         with patch("builtins.input", return_value="3"):
             ball = cli._choose_ball(argparse.Namespace(bola=None), self.state)
         self.assertEqual(ball.slug, "ultraball")
+
+    def test_ball_menu_interrupt_defaults_to_basic_ball(self):
+        with patch("builtins.input", side_effect=KeyboardInterrupt):
+            ball = cli._choose_ball(argparse.Namespace(bola=None), self.state)
+        self.assertEqual(ball.slug, "pokeball")
 
     def test_menu_is_skipped_when_only_basic_ball_is_available(self):
         self.state["balls"] = {"superball": 0, "ultraball": 0, "masterball": 0}
@@ -72,21 +80,24 @@ class BallSelectionTests(unittest.TestCase):
         }
         sync = inventory.SyncResult(self.state, (), 0, 0)
         args = argparse.Namespace(bola="poke", debug=debug)
+        use_case = MagicMock()
+        use_case.execute.return_value = cli.capture_application.CaptureResult(
+            cli.capture_application.CaptureStatus.CAUGHT,
+            chance=0.176,
+            capture_id=1,
+        )
+        species_data = MagicMock()
+        species_data.execute.return_value = cache
         with (
-            patch.object(cli.paths, "read_last_seen", return_value=last_seen),
-            patch.object(cli.inventory, "sync_activity", return_value=sync),
-            patch.object(cli.inventory, "consume_ball"),
-            patch.object(cli.storage, "get_connection"),
-            patch.object(cli.storage, "get_species_cache", return_value=cache),
-            patch.object(cli.capture, "catch_chance", return_value=0.176),
-            patch.object(cli.capture, "roll_capture", return_value=True),
-            patch.object(cli.storage, "insert_capture", return_value=1) as insert_capture,
-            patch.object(cli.paths, "mark_last_seen_captured"),
+            patch.object(cli.composition, "read_encounter", return_value=last_seen),
+            patch.object(inventory, "sync_activity", return_value=sync),
+            patch.object(cli, "_species_data_use_case", return_value=species_data),
+            patch.object(cli, "_capture_encounter_use_case", return_value=use_case),
             patch.object(cli.animation, "play_capture_animation") as play_animation,
             cli.console.capture() as captured,
         ):
             self.assertEqual(cli.cmd_capturar(args), 0)
-            self.assertEqual(insert_capture.call_args.args[-1], "pokeball")
+            self.assertEqual(use_case.execute.call_args.args[0].ball_slug, "pokeball")
             self.assertEqual(play_animation.call_args.kwargs["ball_slug"], "pokeball")
         return captured.get()
 
@@ -109,42 +120,62 @@ class TeamSelectorTests(unittest.TestCase):
 
     def test_add_without_id_uses_interactive_selection(self):
         args = argparse.Namespace(accion="add", id=None)
+        use_case = MagicMock()
+        use_case.execute.return_value = cli.team_application.TeamResult(
+            cli.team_application.TeamStatus.ADDED, 2
+        )
         with (
-            patch.object(cli.storage, "get_connection", return_value=self.conn),
             patch.object(cli, "_select_capture_for_team", return_value=2) as picker,
+            patch.object(cli, "_manage_team_use_case", return_value=use_case),
         ):
             self.assertEqual(cli.cmd_equipo(args), 0)
-        picker.assert_called_once_with(self.conn)
-        self.assertEqual(storage.get_capture(self.conn, 2)["in_team"], 1)
+        picker.assert_called_once_with()
+        use_case.execute.assert_called_once_with(cli.team_application.TeamAction.ADD, 2)
 
-    def test_six_member_limit_prevents_opening_selector(self):
-        for capture_id in (1, 2, 3):
-            storage.set_team(self.conn, capture_id, True)
-        for index in range(3):
-            self.conn.execute(
-                "INSERT INTO captures (species, form, shiny, caught_at, in_team) "
-                "VALUES (?, 'regular', 0, ?, 1)",
-                (f"extra-{index}", f"2026-07-14T1{index}:00:00+00:00"),
-            )
-        self.conn.commit()
-        args = argparse.Namespace(accion="add", id=None)
-        with (
-            patch.object(cli.storage, "get_connection", return_value=self.conn),
-            patch.object(cli, "_select_capture_for_team") as picker,
-        ):
-            self.assertEqual(cli.cmd_equipo(args), 1)
-        picker.assert_not_called()
+    def _patch_collection(self):
+        rows = [dict(row) for row in storage.list_captures(self.conn)]
+        for row in rows:
+            row["types"] = None
+        queries = MagicMock()
+        queries.available_for_team.return_value = rows
+        return patch.object(cli, "_collection_queries", return_value=queries)
+
+    def test_empty_collection_cancels_selection(self):
+        queries = MagicMock()
+        queries.available_for_team.return_value = []
+        with patch.object(cli, "_collection_queries", return_value=queries):
+            self.assertIsNone(cli._select_capture_for_team())
 
     def test_arrow_navigation_wraps_and_enter_selects(self):
         live = MagicMock()
         live.__enter__.return_value = live
         with (
+            self._patch_collection(),
             patch.object(cli.sys.stdin, "isatty", return_value=True),
             patch.object(cli, "_read_menu_key", side_effect=["down", "enter"]),
             patch.object(cli, "Live", return_value=live),
         ):
             # list_captures ordena por fecha descendente: 3, 2, 1.
-            self.assertEqual(cli._select_capture_for_team(self.conn), 2)
+            self.assertEqual(cli._select_capture_for_team(), 2)
+
+    def test_non_tty_interrupt_cancels_selection(self):
+        with (
+            self._patch_collection(),
+            patch.object(cli.sys.stdin, "isatty", return_value=False),
+            patch("builtins.input", side_effect=KeyboardInterrupt),
+        ):
+            self.assertIsNone(cli._select_capture_for_team())
+
+    def test_tty_interrupt_cancels_selection(self):
+        live = MagicMock()
+        live.__enter__.return_value = live
+        with (
+            self._patch_collection(),
+            patch.object(cli.sys.stdin, "isatty", return_value=True),
+            patch.object(cli, "_read_menu_key", side_effect=KeyboardInterrupt),
+            patch.object(cli, "Live", return_value=live),
+        ):
+            self.assertIsNone(cli._select_capture_for_team())
 
 
 class EvolutionHookTests(unittest.TestCase):
@@ -162,15 +193,25 @@ class EvolutionHookTests(unittest.TestCase):
             )
         conn.commit()
 
+        processor = MagicMock()
+        processor.pending.return_value = (
+            cli.evolution_application.PendingEvolution(
+                1, "bulbasaur", "regular", "ivysaur", "regular", False, 16
+            ),
+            cli.evolution_application.PendingEvolution(
+                2, "charmander", "regular", "charmeleon", "regular", False, 16
+            ),
+        )
+        processor.execute.return_value = processor.pending.return_value
+
         args = argparse.Namespace(generations="1-3")
         with (
-            patch.object(cli.storage, "get_connection", return_value=conn),
+            patch.object(cli, "_process_evolutions_use_case", return_value=processor),
             patch.object(cli, "_sync_training", return_value=(MagicMock(), ())),
-            patch.object(cli.pokeapi, "fetch_species_data", return_value=None),
+            patch.object(cli, "_species_data_use_case") as species_data,
             patch.object(cli.animation, "play_evolution_animation") as animate,
-            patch.object(cli.progression, "queue_current_evolution"),
-            patch.object(cli.paths, "clear_last_seen") as clear_seen,
-            patch.object(cli.krabby_bridge, "run_hook") as wild_hook,
+            patch.object(cli.composition, "clear_encounter") as clear_seen,
+            patch.object(cli.composition, "run_wild_encounter") as wild_hook,
             cli.console.capture() as output,
         ):
             self.assertEqual(cli.cmd_hook(args), 0)
@@ -180,15 +221,39 @@ class EvolutionHookTests(unittest.TestCase):
             [call.args[3] for call in animate.call_args_list],
             ["ivysaur", "charmeleon"],
         )
-        self.assertEqual(
-            [storage.get_capture(conn, capture_id)["species"] for capture_id in (1, 2)],
-            ["ivysaur", "charmeleon"],
-        )
+        processor.execute.assert_called_once_with([1, 2])
         clear_seen.assert_called_once()
         wild_hook.assert_not_called()
+        self.assertEqual(species_data.return_value.execute.call_count, 2)
         self.assertNotIn("evoluciones pendientes", output.get())
         self.assertNotIn("Evolución 1 de", output.get())
         conn.close()
+
+
+class HookFailureBoundaryTests(unittest.TestCase):
+    def test_recoverable_hook_failure_never_breaks_shell_startup(self):
+        stderr = io.StringIO()
+        with (
+            patch.object(cli, "cmd_hook", side_effect=OSError("temporary lock failure")),
+            patch.object(sys, "argv", ["pokedex", "hook"]),
+            contextlib.redirect_stderr(stderr),
+        ):
+            self.assertEqual(cli.main(), 0)
+
+        output = stderr.getvalue()
+        self.assertNotIn("Traceback", output)
+        self.assertIn("temporary lock failure", output)
+
+    def test_recoverable_database_failure_is_clean_for_manual_command(self):
+        stderr = io.StringIO()
+        with (
+            patch.object(cli, "cmd_bolsas", side_effect=sqlite3.DatabaseError("corrupt")),
+            patch.object(sys, "argv", ["pokedex", "bolsas"]),
+            contextlib.redirect_stderr(stderr),
+        ):
+            self.assertEqual(cli.main(), 1)
+        self.assertIn("corrupt", stderr.getvalue())
+        self.assertNotIn("Traceback", stderr.getvalue())
 
 
 if __name__ == "__main__":

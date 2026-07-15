@@ -1,0 +1,78 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pokedex-cli"
+version = "0.1.0"
+description = "Una Pokédex local que convierte la actividad diaria en una aventura de terminal"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31,<3",
+    "rich>=13.7,<16",
+]
+
+[project.optional-dependencies]
+dev = [
+    "hypothesis>=6.100,<7",
+    "mypy>=1.10,<2",
+    "mutmut>=3.5,<4",
+    "pytest>=8.2,<9",
+    "pytest-cov>=7,<8",
+    "ruff>=0.5,<1",
+    "types-requests>=2.31,<3",
+]
+
+[project.scripts]
+pokedex = "pokedex_cli.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["pokedex_cli*"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers"
+testpaths = ["tests"]
+markers = [
+    "install: builds and validates a complete temporary installation",
+    "stress: exercises high-concurrency process scenarios",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["pokedex_cli"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["pokedex_cli/domain", "pokedex_cli/application", "pokedex_cli/infrastructure"]
+warn_unused_configs = true
+exclude = ["^(?!pokedex_cli/(domain|application|infrastructure)/)"]
+
+[tool.mutmut]
+source_paths = ["pokedex_cli/"]
+only_mutate = [
+    "pokedex_cli/domain/capture.py",
+    "pokedex_cli/domain/progression.py",
+    "pokedex_cli/domain/rewards.py",
+    "pokedex_cli/application/activity.py",
+]
+pytest_add_cli_args_test_selection = [
+    "tests/domain/test_capture.py",
+    "tests/domain/test_progression.py",
+    "tests/domain/test_rewards.py",
+    "tests/application/test_activity.py",
+]
+mutate_only_covered_lines = true

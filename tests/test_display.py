@@ -21,6 +21,10 @@ class VisionCaptureBallTests(unittest.TestCase):
             "generation": "generation-i",
             "flavor_text": None,
             "ball_slug": "masterball",
+            "level": 5,
+            "is_max_level": False,
+            "experience_into_level": 0,
+            "experience_for_next_level": 91,
         }
         console = Console(width=140)
         with console.capture() as captured:
@@ -41,6 +45,10 @@ class VisionCaptureBallTests(unittest.TestCase):
             "in_team": 0,
             "generation": "generation-i",
             "flavor_text": None,
+            "level": 5,
+            "is_max_level": False,
+            "experience_into_level": 0,
+            "experience_for_next_level": 91,
         }
         console = Console(width=140)
         with console.capture() as captured:

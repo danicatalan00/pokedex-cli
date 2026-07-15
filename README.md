@@ -99,6 +99,25 @@ Completa subcomandos, formas, resultados de `demo`, nombres de Pokémon reales (
 
 Crea un venv (`--system-site-packages`, reutiliza `rich`/`requests` ya instalados en el sistema, sin tocar nada global) y el shim ejecutable `~/bin/pokedex`. Es idempotente: se puede volver a ejecutar sin problema si se mueve o reclona el proyecto.
 
+## Desarrollo y verificación
+
+El proyecto soporta Python 3.11–3.13. Para crear un entorno reproducible de
+desarrollo y ejecutar los mismos controles que CI:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -e '.[dev]'
+.venv/bin/python -m pytest --cov --cov-report=term-missing
+.venv/bin/python -m ruff check .
+.venv/bin/python -m ruff format --check .
+.venv/bin/python -m mypy pokedex_cli/domain pokedex_cli/application
+```
+
+Los tests ordinarios bloquean las conexiones de red no inyectadas y usan rutas
+temporales para no tocar el `HOME`, la base de datos ni los repositorios reales
+del usuario. Los escenarios de concurrencia ejecutan tanto sincronizaciones
+simultáneas como veinte procesos reales del hook.
+
 ## Simplificaciones y casos límite conocidos
 
 - Las formas Paldeanas de Tauros (`tauros-paldea`) no tienen equivalente exacto en PokeAPI; se capturan igual, pero sus stats/tipos son los de la especie base (se marca como aproximado).

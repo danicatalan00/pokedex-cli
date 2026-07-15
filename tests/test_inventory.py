@@ -1,12 +1,15 @@
+import json
 import os
 import subprocess
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from pokedex_cli import inventory
-
 
 UTC = timezone.utc
 
@@ -22,9 +25,7 @@ class InventoryTests(unittest.TestCase):
         self.tempdir.cleanup()
 
     def test_initial_stock_and_infinite_basic_ball(self):
-        state = inventory.load_inventory(
-            self.inventory_path, datetime(2026, 7, 13, 9, tzinfo=UTC)
-        )
+        state = inventory.load_inventory(self.inventory_path, datetime(2026, 7, 13, 9, tzinfo=UTC))
         self.assertEqual(state["balls"], inventory.INITIAL_STOCK)
         self.assertIsNone(inventory.stock_count(state, "pokeball"))
 
@@ -38,11 +39,40 @@ class InventoryTests(unittest.TestCase):
         inventory.save_inventory(state, self.inventory_path)
 
         inventory.consume_ball("ultraball", self.inventory_path)
-        self.assertEqual(
-            inventory.load_inventory(self.inventory_path)["balls"]["ultraball"], 0
-        )
+        self.assertEqual(inventory.load_inventory(self.inventory_path)["balls"]["ultraball"], 0)
         with self.assertRaisesRegex(ValueError, "Ultraball"):
             inventory.consume_ball("ultraball", self.inventory_path)
+
+    def test_concurrent_consumers_do_not_lose_an_update(self):
+        state = inventory.load_inventory(self.inventory_path)
+        state["balls"]["ultraball"] = 2
+        inventory.save_inventory(state, self.inventory_path)
+
+        both_consumers_loaded = threading.Barrier(2)
+        original_load = inventory.load_inventory
+        errors: list[BaseException] = []
+
+        def synchronised_load(*args, **kwargs):
+            loaded = original_load(*args, **kwargs)
+            both_consumers_loaded.wait(timeout=2)
+            return loaded
+
+        def consume() -> None:
+            try:
+                inventory.consume_ball("ultraball", self.inventory_path)
+            except BaseException as error:
+                errors.append(error)
+
+        with patch.object(inventory, "load_inventory", synchronised_load):
+            consumers = [threading.Thread(target=consume) for _ in range(2)]
+            for consumer in consumers:
+                consumer.start()
+            for consumer in consumers:
+                consumer.join(timeout=3)
+
+        self.assertFalse(any(consumer.is_alive() for consumer in consumers))
+        self.assertEqual(errors, [])
+        self.assertEqual(inventory.load_inventory(self.inventory_path)["balls"]["ultraball"], 0)
 
     def test_time_grants_one_super_ball_per_day(self):
         start = datetime(2026, 7, 13, 9, tzinfo=UTC)
@@ -55,6 +85,42 @@ class InventoryTests(unittest.TestCase):
         )
         self.assertEqual(result.inventory["balls"]["superball"], 5)
         self.assertEqual(result.rewards, (inventory.Reward("superball", 2, "tiempo"),))
+
+    def test_twenty_concurrent_syncs_do_not_duplicate_commit_rewards(self):
+        now = datetime(2026, 7, 15, 10, tzinfo=UTC)
+        state = inventory.load_inventory(self.inventory_path, now)
+        state["activity"].update(
+            {
+                "work_commits": 2,
+                "last_repo_scan_at": inventory._iso(now),
+                "last_synced_at": inventory._iso(now),
+                "repositories": [],
+            }
+        )
+        inventory.save_inventory(state, self.inventory_path)
+        commit = inventory.WorkCommit("one-commit", 3, 1)
+
+        def candidates(repositories, since, already_processed):
+            if commit.oid in already_processed:
+                return {}
+            return {commit.oid: commit}
+
+        with patch.object(inventory, "_new_work_commits", side_effect=candidates):
+            with ThreadPoolExecutor(max_workers=20) as pool:
+                results = list(
+                    pool.map(
+                        lambda _: inventory.sync_activity(
+                            self.inventory_path, home=self.root, now=now
+                        ),
+                        range(20),
+                    )
+                )
+
+        final = inventory.load_inventory(self.inventory_path, now)
+        self.assertEqual(sum(result.new_work_commits for result in results), 1)
+        self.assertEqual(final["activity"]["work_commits"], 3)
+        self.assertEqual(final["balls"]["superball"], 4)
+        self.assertEqual(final["activity"]["processed_commits"], [commit.oid])
 
     def test_commit_thresholds_are_cumulative(self):
         state = inventory.load_inventory(self.inventory_path)
@@ -183,6 +249,29 @@ class InventoryTests(unittest.TestCase):
             capture_output=True,
             env=full_env,
         )
+
+
+class SQLiteInventoryIntegrationTests(unittest.TestCase):
+    def test_default_path_imports_legacy_json_then_uses_sqlite_as_authority(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            database_path = root / "pokedex.db"
+            legacy_path = root / "inventory.json"
+            now = datetime(2026, 7, 15, 10, tzinfo=UTC)
+            legacy = inventory._new_inventory(now)
+            legacy["balls"]["ultraball"] = 1
+            legacy_path.write_text(json.dumps(legacy))
+
+            with (
+                patch.object(inventory.paths, "DB_PATH", database_path),
+                patch.object(inventory.paths, "INVENTORY_PATH", legacy_path),
+            ):
+                loaded = inventory.load_inventory(now=now)
+                self.assertEqual(loaded["balls"]["ultraball"], 1)
+                inventory.consume_ball("ultraball")
+                self.assertEqual(inventory.load_inventory(now=now)["balls"]["ultraball"], 0)
+
+            self.assertEqual(json.loads(legacy_path.read_text()), legacy)
 
 
 if __name__ == "__main__":

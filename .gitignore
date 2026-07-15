@@ -1,3 +1,11 @@
 .venv/
 __pycache__/
 *.pyc
+.coverage
+*.egg-info/
+.hypothesis/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+build/
+mutants/

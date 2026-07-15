@@ -79,9 +79,7 @@ class CaptureBallStorageTests(unittest.TestCase):
             with patch.object(storage, "DB_PATH", db_path):
                 conn = storage.get_connection()
                 slugs = {r["ball_slug"] for r in storage.list_captures(conn)}
-                self.assertEqual(
-                    slugs, {"pokeball", "superball", "ultraball", "masterball"}
-                )
+                self.assertEqual(slugs, {"pokeball", "superball", "ultraball", "masterball"})
                 conn.close()
 
 
