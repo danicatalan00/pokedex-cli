@@ -1,6 +1,6 @@
 # Personalizar el logo
 
-El README referencia siempre `docs/assets/rotom-logo.svg`. El archivo es
+El README referencia siempre `docs/assets/project-logo.svg`. El archivo es
 estático para GitHub, pero se regenera desde Krabby con una configuración
 versionada.
 

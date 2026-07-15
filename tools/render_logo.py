@@ -16,7 +16,7 @@ RGB = tuple[int, int, int]
 ANSI = re.compile(r"\x1b\[([0-9;]*)m")
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = PROJECT_ROOT / "docs" / "assets" / "logo.toml"
-DEFAULT_OUTPUT = PROJECT_ROOT / "docs" / "assets" / "rotom-logo.svg"
+DEFAULT_OUTPUT = PROJECT_ROOT / "docs" / "assets" / "project-logo.svg"
 
 
 @dataclass(frozen=True)

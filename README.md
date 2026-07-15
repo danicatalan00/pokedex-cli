@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/rotom-logo.svg" width="720" alt="Pokédex CLI — Rotom terminal sprite">
+  <img src="docs/assets/project-logo.svg" width="720" alt="Pokédex CLI — terminal sprite logo">
 </p>
 
 <p align="center">
