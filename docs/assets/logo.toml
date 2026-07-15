@@ -1,6 +1,6 @@
 [logo]
-pokemon = "rotom"
-form = "regular"
+pokemon = "charizard"
+form = "mega-x"
 shiny = false
 title = "POKÉDEX CLI"
 tagline = "catch · train · evolve"
