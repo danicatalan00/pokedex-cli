@@ -7,11 +7,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from pokedex_cli.infrastructure.diagnostics import log_failure
 from pokedex_cli.infrastructure.krabby import KrabbyClient
 from pokedex_cli.infrastructure.paths import KRABBY_POKEMON_JSON, ensure_dirs
 
 KRABBY_CONFIG_PATH = Path.home() / ".config/krabby/config.toml"
 DEFAULT_SHINY_RATE = 1 / 128
+HOOK_COMMAND_TIMEOUT_SECONDS = 1.0
 CARGO_POKEMON_JSON_GLOB = str(Path.home() / ".cargo/registry/src/*/krabby-*/assets/pokemon.json")
 
 
@@ -50,7 +52,11 @@ def _ensure_pokemon_db() -> list[dict[str, Any]] | None:
 def list_pool(generations: str) -> list[str]:
     """Base species slugs for the given generation spec, via `krabby list`."""
     result = subprocess.run(
-        ["krabby", "list", generations], capture_output=True, text=True, check=True
+        ["krabby", "list", generations],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=HOOK_COMMAND_TIMEOUT_SECONDS,
     )
     return [line for line in result.stdout.splitlines() if line]
 
@@ -84,7 +90,7 @@ def render_sprite(species: str, form: str, shiny: bool, show_title: bool, info: 
         args.append("-s")
     if not show_title:
         args.append("--no-title")
-    subprocess.run(args, check=True)
+    subprocess.run(args, check=True, timeout=HOOK_COMMAND_TIMEOUT_SECONDS)
 
 
 def capture_sprite(species: str, form: str, shiny: bool) -> str | None:
@@ -96,17 +102,20 @@ def capture_sprite(species: str, form: str, shiny: bool) -> str | None:
 
 def _best_effort_fallback(generations: str) -> None:
     try:
-        subprocess.run(["krabby", "random", generations, "--no-title", "-i"], check=False)
+        subprocess.run(
+            ["krabby", "random", generations, "--no-title", "-i"],
+            check=False,
+            timeout=HOOK_COMMAND_TIMEOUT_SECONDS,
+        )
     except Exception:
         pass
 
 
-def run_hook(
-    generations: str, write_last_seen: Callable[[str, str, bool], None]
-) -> None:
+def run_hook(generations: str, write_last_seen: Callable[[str, str, bool], None]) -> None:
     try:
         species, form, shiny = pick_species_form_shiny(generations)
         write_last_seen(species, form, shiny)
         render_sprite(species, form, shiny, show_title=False, info=True)
-    except Exception:
+    except Exception as error:
+        log_failure("wild encounter", error)
         _best_effort_fallback(generations)

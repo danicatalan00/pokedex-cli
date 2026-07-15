@@ -191,7 +191,13 @@ def test_tolerant_boundary_turns_typed_failure_into_offline_fallback() -> None:
         def fetch_species_data(self, species: str, form: str) -> dict:
             raise Timeout("offline")
 
+    failures = []
     assert (
-        TolerantPokeApiClient(client=FailingClient()).fetch_species_data("pikachu", "regular")
+        TolerantPokeApiClient(
+            client=FailingClient(),
+            on_error=lambda context, error: failures.append((context, error)),
+        ).fetch_species_data("pikachu", "regular")
         is None
     )
+    assert failures[0][0] == "PokeAPI fallback"
+    assert isinstance(failures[0][1], Timeout)

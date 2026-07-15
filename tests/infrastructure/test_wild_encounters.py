@@ -62,6 +62,7 @@ def test_list_and_render_commands_are_bounded(monkeypatch) -> None:
     runner.return_value.stdout = "pikachu\nbulbasaur\n"
     monkeypatch.setattr(wild_encounters.subprocess, "run", runner)
     assert wild_encounters.list_pool("1-3") == ["pikachu", "bulbasaur"]
+    assert runner.call_args.kwargs["timeout"] == wild_encounters.HOOK_COMMAND_TIMEOUT_SECONDS
     wild_encounters.render_sprite("raichu", "alola", True, show_title=False, info=True)
     assert runner.call_args.args[0] == [
         "krabby",
@@ -73,6 +74,7 @@ def test_list_and_render_commands_are_bounded(monkeypatch) -> None:
         "-s",
         "--no-title",
     ]
+    assert runner.call_args.kwargs["timeout"] == wild_encounters.HOOK_COMMAND_TIMEOUT_SECONDS
 
 
 def test_hook_writes_encounter_or_runs_best_effort_fallback(monkeypatch) -> None:

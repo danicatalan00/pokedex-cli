@@ -127,9 +127,7 @@ def complete_evolution(conn: sqlite3.Connection, capture_id: int) -> None:
     conn.commit()
 
 
-def get_species_cache(
-    conn: sqlite3.Connection, species: str, form: str
-) -> sqlite3.Row | None:
+def get_species_cache(conn: sqlite3.Connection, species: str, form: str) -> sqlite3.Row | None:
     return cast(
         sqlite3.Row | None,
         conn.execute(

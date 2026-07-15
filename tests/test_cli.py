@@ -235,6 +235,7 @@ class HookFailureBoundaryTests(unittest.TestCase):
         stderr = io.StringIO()
         with (
             patch.object(cli, "cmd_hook", side_effect=OSError("temporary lock failure")),
+            patch.object(cli.composition, "record_failure") as record_failure,
             patch.object(sys, "argv", ["pokedex", "hook"]),
             contextlib.redirect_stderr(stderr),
         ):
@@ -243,17 +244,20 @@ class HookFailureBoundaryTests(unittest.TestCase):
         output = stderr.getvalue()
         self.assertNotIn("Traceback", output)
         self.assertIn("temporary lock failure", output)
+        self.assertEqual(record_failure.call_args.args[0], "command hook")
 
     def test_recoverable_database_failure_is_clean_for_manual_command(self):
         stderr = io.StringIO()
         with (
             patch.object(cli, "cmd_bolsas", side_effect=sqlite3.DatabaseError("corrupt")),
+            patch.object(cli.composition, "record_failure") as record_failure,
             patch.object(sys, "argv", ["pokedex", "bolsas"]),
             contextlib.redirect_stderr(stderr),
         ):
             self.assertEqual(cli.main(), 1)
         self.assertIn("corrupt", stderr.getvalue())
         self.assertNotIn("Traceback", stderr.getvalue())
+        self.assertEqual(record_failure.call_args.args[0], "command bolsas")
 
 
 if __name__ == "__main__":

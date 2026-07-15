@@ -9,6 +9,7 @@ from typing import Any, Protocol
 import requests
 
 from pokedex_cli.infrastructure import pokeapi_parsing as parsing
+from pokedex_cli.infrastructure.diagnostics import log_failure
 
 
 class PokeApiError(Exception):
@@ -166,11 +167,17 @@ class PokeApiClient:
 class TolerantPokeApiClient:
     """Translate typed adapter failures into the application's offline fallback."""
 
-    def __init__(self, client: SpeciesClient | None = None) -> None:
+    def __init__(
+        self,
+        client: SpeciesClient | None = None,
+        on_error: Callable[[str, BaseException], None] = log_failure,
+    ) -> None:
         self._client = client or PokeApiClient()
+        self._on_error = on_error
 
     def fetch_species_data(self, species: str, form: str) -> dict[str, Any] | None:
         try:
             return self._client.fetch_species_data(species, form)
-        except PokeApiError:
+        except PokeApiError as error:
+            self._on_error("PokeAPI fallback", error)
             return None

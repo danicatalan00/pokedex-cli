@@ -174,9 +174,12 @@ def test_offline_capture_success_and_failure_are_persisted_atomically(tmp_path: 
     check = database.connect(database_path(success_environment))
     try:
         assert check.execute("SELECT COUNT(*) FROM captures").fetchone()[0] == 1
-        assert check.execute(
-            "SELECT stock FROM inventory_balls WHERE slug = 'masterball'"
-        ).fetchone()[0] == 0
+        assert (
+            check.execute("SELECT stock FROM inventory_balls WHERE slug = 'masterball'").fetchone()[
+                0
+            ]
+            == 0
+        )
     finally:
         check.close()
 
@@ -252,7 +255,9 @@ def test_pending_evolution_completes_before_trying_a_wild_encounter(tmp_path: Pa
     assert "Traceback" not in result.stderr
     check = database.connect(database_path(environment))
     try:
-        evolved = check.execute("SELECT species FROM captures WHERE id = ?", (capture_id,)).fetchone()
+        evolved = check.execute(
+            "SELECT species FROM captures WHERE id = ?", (capture_id,)
+        ).fetchone()
         assert evolved["species"] == "ivysaur"
         assert check.execute("SELECT COUNT(*) FROM encounter_state").fetchone()[0] == 0
     finally:
@@ -271,8 +276,7 @@ def test_hook_is_clean_with_missing_and_available_krabby(tmp_path: Path) -> None
     bin_dir.mkdir()
     executable = bin_dir / "krabby"
     executable.write_text(
-        "#!/bin/sh\n"
-        "if [ \"$1\" = list ]; then printf 'pikachu\\n'; else printf 'PIKACHU\\n'; fi\n"
+        "#!/bin/sh\nif [ \"$1\" = list ]; then printf 'pikachu\\n'; else printf 'PIKACHU\\n'; fi\n"
     )
     executable.chmod(0o755)
     available_environment["PATH"] = f"{bin_dir}:/usr/bin:/bin"

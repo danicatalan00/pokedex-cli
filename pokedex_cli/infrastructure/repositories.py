@@ -325,7 +325,6 @@ class SQLiteSpeciesCacheRepository:
         finally:
             connection.close()
 
-
     def put(
         self,
         species: str,

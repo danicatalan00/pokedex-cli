@@ -1,10 +1,39 @@
 import random
 import unittest
+from io import StringIO
+from unittest.mock import MagicMock
+
+from rich.console import Console
 
 from pokedex_cli import animation
 
 
 class BallAnimationTests(unittest.TestCase):
+    def test_non_tty_playback_skips_decorative_external_work(self):
+        renderer = MagicMock()
+        console = Console(file=StringIO(), force_terminal=False)
+
+        animation.play_capture_animation(
+            console,
+            "pikachu",
+            "regular",
+            False,
+            True,
+            sprite_renderer=renderer,
+        )
+        animation.play_evolution_animation(
+            console,
+            "bulbasaur",
+            "regular",
+            "ivysaur",
+            "regular",
+            False,
+            sprite_renderer=renderer,
+        )
+
+        renderer.capture_sprite.assert_not_called()
+        renderer.render_sprite.assert_not_called()
+
     def test_public_frame_generation_has_stable_dimensions_and_final_click(self):
         sprite = "\x1b[38;2;100;200;100mP\x1b[0m"
         frames = animation.generate_capture_frames(

@@ -456,6 +456,8 @@ def play_capture_animation(
     click y revela la captura; si no, se abre y el Pokémon sigue esperando.
     La animación es decorativa: cualquier fallo se ignora.
     """
+    if not console.is_terminal:
+        return
     try:
         sprite = sprite_renderer.capture_sprite(species, form, shiny) if sprite_renderer else None
         frames = generate_capture_frames(
@@ -470,9 +472,7 @@ def play_capture_animation(
                 time.sleep(delay)
         # Al capturar revelamos el nombre; si se escapó sigue siendo un misterio.
         if sprite_renderer is not None:
-            sprite_renderer.render_sprite(
-                species, form, shiny, show_title=caught, info=False
-            )
+            sprite_renderer.render_sprite(species, form, shiny, show_title=caught, info=False)
     except Exception:
         pass
 
@@ -577,6 +577,11 @@ def play_evolution_animation(
     old_name = old_species.replace("-", " ").title()
     new_name = new_species.replace("-", " ").title()
     console.print(f"\n[bold yellow]¿Qué? ¡{old_name} está evolucionando![/]")
+    if not console.is_terminal:
+        console.print(
+            f"[bold green]¡Enhorabuena! ¡{old_name} ha evolucionado a {new_name}![/]"
+        )
+        return
     try:
         old_sprite = (
             sprite_renderer.capture_sprite(old_species, old_form, shiny)
@@ -596,9 +601,7 @@ def play_evolution_animation(
                 live.update(Align.center(renderable))
                 time.sleep(delay)
         if sprite_renderer is not None:
-            sprite_renderer.render_sprite(
-                new_species, new_form, shiny, show_title=True, info=True
-            )
+            sprite_renderer.render_sprite(new_species, new_form, shiny, show_title=True, info=True)
     except Exception:
         # Incluso sin krabby se conserva la cadencia y el mensaje de revelacion.
         factor = max(0.1, float(speed))

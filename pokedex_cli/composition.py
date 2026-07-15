@@ -18,6 +18,7 @@ from pokedex_cli.application import training as training_application
 from pokedex_cli.domain.models import Ball
 from pokedex_cli.infrastructure import database, paths, wild_encounters
 from pokedex_cli.infrastructure import legacy_inventory as inventory
+from pokedex_cli.infrastructure.diagnostics import log_failure
 from pokedex_cli.infrastructure.krabby import KrabbyClient
 from pokedex_cli.infrastructure.pokeapi import TolerantPokeApiClient
 from pokedex_cli.infrastructure.repositories import (
@@ -128,11 +129,13 @@ def pick_species_form_shiny(generations: str) -> tuple[str, str, bool]:
     return wild_encounters.pick_species_form_shiny(generations)
 
 
-def run_wild_encounter(
-    generations: str, write_last_seen: Callable[[str, str, bool], None]
-) -> None:
+def run_wild_encounter(generations: str, write_last_seen: Callable[[str, str, bool], None]) -> None:
     wild_encounters.run_hook(generations, write_last_seen)
 
 
 def completion_file(shell: str) -> Path:
     return paths.PROJECT_DIR / "completions" / f"_pokedex.{shell}"
+
+
+def record_failure(context: str, error: BaseException) -> None:
+    log_failure(context, error)

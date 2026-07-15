@@ -249,9 +249,7 @@ def cmd_bolsas(args: argparse.Namespace) -> int:
     table.add_column("Stock", justify="right")
     table.add_column("Siguiente", justify="right")
     for ball in composition.ball_catalog().values():
-        count = (
-            "∞" if ball.unlimited else str(composition.stock_count(result.inventory, ball.slug))
-        )
+        count = "∞" if ball.unlimited else str(composition.stock_count(result.inventory, ball.slug))
         missing = composition.commits_until_next(result.inventory, ball.slug)
         if missing is None:
             next_reward = "siempre disponible"
@@ -418,9 +416,7 @@ def cmd_vision(args: argparse.Namespace) -> int:
         if refreshed is not None:
             row = refreshed
 
-    sprite = _sprite_renderer().capture_sprite(
-        row["species"], row["form"], bool(row["shiny"])
-    )
+    sprite = _sprite_renderer().capture_sprite(row["species"], row["form"], bool(row["shiny"]))
     display.render_vision_card(console, row, sprite)
     return 0
 
@@ -825,12 +821,14 @@ def main() -> int:
     try:
         return args.func(args)
     except (sqlite3.Error, OSError) as error:
+        composition.record_failure(f"command {args.command}", error)
         prefix = "pokedex hook" if args.command == "hook" else "pokedex"
         print(f"{prefix}: error recuperable: {error}", file=sys.stderr)
         return 0 if args.command == "hook" else 1
     except Exception as error:
         if args.command != "hook":
             raise
+        composition.record_failure("command hook", error)
         print(f"pokedex hook: {error}", file=sys.stderr)
         return 0
 
