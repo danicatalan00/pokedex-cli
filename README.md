@@ -9,7 +9,8 @@ Nace de `chat-pokedex-cli.txt`, una conversación de chat donde surgió la idea.
 - `~/.zshrc` ya no llama a `krabby random` directamente: llama a `pokedex hook 1-3`, que:
   1. Elige especie + forma (incluye mega/gmax/regional, replicando el algoritmo real de `krabby random` a partir de una copia local de su base de datos) y tira shiny con el mismo `shiny_rate` de `~/.config/krabby/config.toml`.
   2. Pinta el sprite igual que antes (mismo aspecto, sigue sin revelar el nombre).
-  3. Guarda en silencio cuál fue en `~/.local/share/pokedex-cli/last_seen.json` (solo se recuerda el último).
+  3. Guarda en silencio cuál fue en el estado transaccional de `pokedex.db`
+     (solo se recuerda el último).
   - Si algo falla (`krabby` desinstalado, caché de datos ausente, etc.), cae de vuelta al `krabby random` de siempre — la terminal nunca se rompe.
 - `pokedex capturar` intenta guardar ese último Pokémon (con su forma y si es shiny) en SQLite, con una animación de pokeball que se lanza **sobre el sprite real** del Pokémon (lo absorbe, bambolea y hace click), y lo enriquece con PokeAPI si hay red. No captura nada automáticamente: hay que pedirlo.
   - **La captura no está garantizada.** Se tira el dado según el `capture_rate` real del Pokémon y la bola elegida. Si se suelta, puede seguir esperando unos intentos más o huir definitivamente.
@@ -86,10 +87,13 @@ Completa subcomandos, formas, resultados de `demo`, nombres de Pokémon reales (
 
 ## Datos
 
-- Base de datos: `~/.local/share/pokedex-cli/pokedex.db` (tablas `captures` y `species_cache`).
-- Último Pokémon visto: `~/.local/share/pokedex-cli/last_seen.json`.
-- Inventario y progreso de actividad: `~/.local/share/pokedex-cli/inventory.json`.
-- Para empezar de cero: `rm ~/.local/share/pokedex-cli/pokedex.db`.
+- Fuente única de verdad: `~/.local/share/pokedex-cli/pokedex.db` (o el
+  equivalente bajo `$XDG_DATA_HOME`). Guarda capturas, caché, encuentro,
+  inventario, actividad, commits y evoluciones pendientes.
+- Los antiguos `inventory.json` y `last_seen.json` se importan una sola vez y
+  se conservan únicamente por compatibilidad/recuperación.
+- Consulta [arquitectura](docs/architecture.md) y
+  [backup, restauración y diagnóstico](docs/operations.md) antes de tocar datos.
 
 ## Instalación / reinstalación
 
@@ -107,10 +111,12 @@ desarrollo y ejecutar los mismos controles que CI:
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install -e '.[dev]'
-.venv/bin/python -m pytest --cov --cov-report=term-missing
+.venv/bin/python -m pytest -m 'not install and not stress' --cov --cov-report=term-missing
+.venv/bin/python -m pytest -m 'install or stress'
 .venv/bin/python -m ruff check .
 .venv/bin/python -m ruff format --check .
-.venv/bin/python -m mypy pokedex_cli/domain pokedex_cli/application
+.venv/bin/python -m mypy
+.venv/bin/python -m mutmut run
 ```
 
 Los tests ordinarios bloquean las conexiones de red no inyectadas y usan rutas
