@@ -1,0 +1,15 @@
+Auditoría de cobertura de evoluciones
+Fecha: 2026-07-15
+Fuente: PokeAPI/pokeapi data/v2/csv (rama master)
+
+Especies con una preevolución declarada: 484
+Registros históricos de requisitos de evolución: 550
+Transiciones sin nivel asignable por las reglas 1-6: 0
+
+Lista de transiciones no cubiertas:
+(vacía)
+
+Nota: Meltan -> Melmetal no tiene un registro de requisitos en
+pokemon_evolution.csv y la API en vivo mantiene ambas especies en cadenas
+separadas. pokemon_species.csv sí declara la relación; se conserva como la única
+corrección local y recibe el nivel estructural de una familia de dos fases.

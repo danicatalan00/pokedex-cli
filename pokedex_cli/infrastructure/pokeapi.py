@@ -140,7 +140,7 @@ class PokeApiClient:
             "generation": species_json.get("generation", {}).get("name"),
             "growth_rate": species_json.get("growth_rate", {}).get("name"),
             "level_evolutions": parsing._level_evolutions(
-                species_json, species, form, self._get_json
+                species_json, pokemon_json, species, form, self._get_json
             ),
             "flavor_text": parsing._flavor_text(species_json),
             "form_data_exact": form_data_exact,

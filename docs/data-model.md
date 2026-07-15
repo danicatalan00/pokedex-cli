@@ -19,6 +19,9 @@ El archivo `${XDG_DATA_HOME:-$HOME/.local/share}/pokedex-cli/pokedex.db` es la
 - Restricciones y triggers sostienen invariantes incluso bajo concurrencia.
 - `species_cache` permite continuar offline; no es una segunda fuente de verdad
   para el estado del juego.
+- Los stats son los valores base compartidos por especie y forma. Cada captura
+  mantiene identidad propia mediante ID, nivel, EXP, shiny, fecha y Pokéball;
+  pueden coexistir duplicados para formas y evoluciones ramificadas.
 
 `inventory.json` y `last_seen.json` solo son entradas históricas. Se importan
 una vez y se conservan para recuperación, no para escrituras activas.

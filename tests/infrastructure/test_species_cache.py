@@ -1,5 +1,6 @@
 import json
 
+from pokedex_cli.infrastructure import database
 from pokedex_cli.infrastructure.repositories import SQLiteSpeciesCacheRepository
 
 
@@ -39,3 +40,29 @@ def test_sqlite_species_cache_round_trips_and_updates_payload(tmp_path):
     updated = repository.get("pikachu", "regular")
     assert updated["pokedex_id"] == 26
     assert updated["fetched_at"] == "2026-07-16T10:00:00+00:00"
+
+
+def test_refresh_catalog_lists_unique_captures_and_clears_all_cached_profiles(tmp_path):
+    path = tmp_path / "pokedex.db"
+    repository = SQLiteSpeciesCacheRepository(path)
+    connection = database.connect(path)
+    try:
+        connection.executemany(
+            "INSERT INTO captures (species, form, shiny, caught_at) VALUES (?, ?, 0, 'now')",
+            [("pichu", "regular"), ("pichu", "regular"), ("slowking", "galar")],
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    repository.put("pichu", "regular", payload(), "now")
+    repository.put("eevee", "regular", payload(), "now")
+
+    assert [(item.species, item.form) for item in repository.captured()] == [
+        ("pichu", "regular"),
+        ("slowking", "galar"),
+    ]
+
+    repository.clear()
+
+    assert repository.get("pichu", "regular") is None
+    assert repository.get("eevee", "regular") is None

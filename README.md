@@ -52,8 +52,16 @@ terminal está explicada en la [guía de instalación](docs/installation.md).
 | `pokedex list` | Ver la colección |
 | `pokedex search <nombre>` | Consultar una especie o forma |
 | `pokedex vision <id>` | Abrir la ficha de una captura |
-| `pokedex equipo` | Gestionar el equipo |
+| `pokedex equipo [add\|remove] [id\|nombre]` | Gestionar el equipo o elegir en un selector |
+| `pokedex refresh` | Borrar y recargar desde PokeAPI los datos de las capturas |
 | `pokedex demo` | Probar animaciones sin guardar estado |
+
+Las evoluciones que en los juegos requieren amistad, objetos, intercambio u
+otras condiciones reciben un nivel equivalente. Se conserva cualquier nivel
+publicado por PokeAPI; para el resto se usa el movimiento requerido, una rama
+hermana o la estructura de la familia. Las ramas disponibles al mismo nivel se
+resuelven al azar, por lo que varias capturas de Eevee pueden evolucionar de
+forma distinta.
 
 ## Documentación
 

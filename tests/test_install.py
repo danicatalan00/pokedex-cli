@@ -28,8 +28,10 @@ def installed_home(tmp_path_factory: pytest.TempPathFactory) -> Path:
     zshrc = home / ".zshrc"
     zshrc.write_text("# existing configuration\nexport EDITOR=vim\n")
     first = run_install(home)
+    (home / ".zcompdump-stale").write_text("old completion cache")
     second = run_install(home)
     assert first.returncode == second.returncode == 0
+    assert not (home / ".zcompdump-stale").exists()
     return home
 
 
@@ -42,6 +44,7 @@ def test_install_is_idempotent_and_preserves_existing_zshrc(
     assert "# existing configuration" in contents
     assert "export EDITOR=vim" in contents
     assert contents.count("# pokedex-cli: autocompletado") == 1
+    assert contents.count("unfunction _pokedex 2>/dev/null") == 1
     shim = home / "bin" / "pokedex"
     assert shim.stat().st_mode & 0o111
     assert "PYTHONPATH" not in shim.read_text()

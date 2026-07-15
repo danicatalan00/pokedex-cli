@@ -115,7 +115,7 @@ def test_incomplete_or_invalid_json_is_rejected(payload: object) -> None:
         client.fetch_species_data("pikachu", "regular")
 
 
-def test_evolution_contract_keeps_only_pure_level_rules() -> None:
+def test_explicit_level_wins_over_an_item_alternative_for_same_route() -> None:
     species = species_payload()
     species["evolution_chain"] = {"url": "https://example.test/chain/1"}
     chain = {
@@ -150,6 +150,172 @@ def test_evolution_contract_keeps_only_pure_level_rules() -> None:
     )
     result = PokeApiClient(session=session).fetch_species_data("pikachu", "regular")
     assert result["level_evolutions"] == [{"species": "raichu", "form": "regular", "min_level": 20}]
+
+
+def evolution_species_payload(name: str, *, is_baby: bool = False) -> dict:
+    payload = species_payload()
+    payload["id"] = 1
+    payload["is_baby"] = is_baby
+    payload["varieties"] = [{"is_default": True, "pokemon": {"name": name}}]
+    payload["evolution_chain"] = {"url": "https://example.test/chain/1"}
+    return payload
+
+
+def detail(
+    trigger: str,
+    *,
+    min_level: int | None = None,
+    is_default: bool = True,
+    **conditions,
+) -> dict:
+    return {
+        "trigger": {"name": trigger},
+        "min_level": min_level,
+        "is_default": is_default,
+        "version_group": {"name": "red-blue", "url": "https://example.test/version/1"},
+        **conditions,
+    }
+
+
+def link(name: str, details: list[dict] | None = None, children: list[dict] | None = None):
+    return {
+        "species": {"name": name},
+        "evolution_details": details or [],
+        "evolves_to": children or [],
+    }
+
+
+def fetch_evolutions(species: dict, pokemon: dict, chain: dict) -> list[dict]:
+    session = FakeSession(
+        [FakeResponse(200, species), FakeResponse(200, pokemon), FakeResponse(200, chain)]
+    )
+    return PokeApiClient(session=session).fetch_species_data(
+        species["varieties"][0]["pokemon"]["name"], "regular"
+    )["level_evolutions"]
+
+
+def test_keeps_explicit_level_even_when_original_evolution_has_conditions() -> None:
+    species = evolution_species_payload("pancham")
+    chain = {
+        "chain": link(
+            "pancham",
+            children=[
+                link(
+                    "pangoro",
+                    [detail("level-up", min_level=32, party_type={"name": "dark"})],
+                )
+            ],
+        )
+    }
+
+    assert fetch_evolutions(species, pokemon_payload(), chain) == [
+        {"species": "pangoro", "form": "regular", "min_level": 32}
+    ]
+
+
+def test_infers_family_levels_for_friendship_and_item_evolutions() -> None:
+    species = evolution_species_payload("pichu", is_baby=True)
+    chain = {
+        "chain": link(
+            "pichu",
+            children=[
+                link(
+                    "pikachu",
+                    [detail("level-up", min_happiness=220)],
+                    [link("raichu", [detail("use-item", item={"name": "thunder-stone"})])],
+                )
+            ],
+        )
+    }
+
+    assert fetch_evolutions(species, pokemon_payload(), chain) == [
+        {"species": "pikachu", "form": "regular", "min_level": 20}
+    ]
+
+
+def test_infers_known_move_evolution_from_selected_version_learnset() -> None:
+    species = evolution_species_payload("aipom")
+    pokemon = pokemon_payload()
+    pokemon["moves"] = [
+        {
+            "move": {"name": "double-hit"},
+            "version_group_details": [
+                {
+                    "level_learned_at": 32,
+                    "version_group": {"name": "red-blue"},
+                    "move_learn_method": {"name": "level-up"},
+                }
+            ],
+        }
+    ]
+    chain = {
+        "chain": link(
+            "aipom",
+            children=[
+                link(
+                    "ambipom",
+                    [detail("level-up", known_move={"name": "double-hit"})],
+                )
+            ],
+        )
+    }
+
+    assert fetch_evolutions(species, pokemon, chain) == [
+        {"species": "ambipom", "form": "regular", "min_level": 32}
+    ]
+
+
+def test_missing_branch_reuses_explicit_sibling_level() -> None:
+    species = evolution_species_payload("kirlia")
+    chain = {
+        "chain": link(
+            "ralts",
+            children=[
+                link(
+                    "kirlia",
+                    [detail("level-up", min_level=20)],
+                    [
+                        link("gardevoir", [detail("level-up", min_level=30)]),
+                        link("gallade", [detail("use-item", item={"name": "dawn-stone"})]),
+                    ],
+                )
+            ],
+        )
+    }
+
+    assert fetch_evolutions(species, pokemon_payload(), chain) == [
+        {"species": "gardevoir", "form": "regular", "min_level": 30},
+        {"species": "gallade", "form": "regular", "min_level": 30},
+    ]
+
+
+def test_inferred_late_stage_stays_above_previous_explicit_threshold() -> None:
+    species = evolution_species_payload("bisharp")
+    chain = {
+        "chain": link(
+            "pawniard",
+            children=[
+                link(
+                    "bisharp",
+                    [detail("level-up", min_level=52)],
+                    [link("kingambit", [detail("three-defeated-bisharp")])],
+                )
+            ],
+        )
+    }
+
+    assert fetch_evolutions(species, pokemon_payload(), chain) == [
+        {"species": "kingambit", "form": "regular", "min_level": 62}
+    ]
+
+
+def test_chain_link_without_any_pokeapi_detail_still_gets_a_level() -> None:
+    species = evolution_species_payload("meltan")
+    chain = {"chain": link("meltan")}
+
+    assert fetch_evolutions(species, pokemon_payload(), chain) == [
+        {"species": "melmetal", "form": "regular", "min_level": 30}
+    ]
 
 
 @pytest.mark.parametrize(

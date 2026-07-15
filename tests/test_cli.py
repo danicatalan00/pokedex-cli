@@ -59,6 +59,9 @@ class BallSelectionTests(unittest.TestCase):
         self.assertEqual(evolution.destino, "ivysaur")
         self.assertEqual(evolution.speed, 0.7)
 
+        team = cli.build_parser().parse_args(["equipo", "add", "eevee"])
+        self.assertEqual(team.id, "eevee")
+
     def test_capture_probability_is_only_printed_in_debug_mode(self):
         normal = self._run_mock_capture(debug=False)
         debug = self._run_mock_capture(debug=True)
@@ -130,22 +133,39 @@ class TeamSelectorTests(unittest.TestCase):
             patch.object(cli, "_manage_team_use_case", return_value=use_case),
         ):
             self.assertEqual(cli.cmd_equipo(args), 0)
-        picker.assert_called_once_with()
+        picker.assert_called_once_with(cli.team_application.TeamAction.ADD, None)
         use_case.execute.assert_called_once_with(cli.team_application.TeamAction.ADD, 2)
 
-    def _patch_collection(self):
+    def test_remove_without_identifier_uses_team_selection(self):
+        args = argparse.Namespace(accion="remove", id=None)
+        use_case = MagicMock()
+        use_case.execute.return_value = cli.team_application.TeamResult(
+            cli.team_application.TeamStatus.REMOVED, 2
+        )
+        with (
+            patch.object(cli, "_select_capture_for_team", return_value=2) as picker,
+            patch.object(cli, "_manage_team_use_case", return_value=use_case),
+        ):
+            self.assertEqual(cli.cmd_equipo(args), 0)
+        picker.assert_called_once_with(cli.team_application.TeamAction.REMOVE, None)
+        use_case.execute.assert_called_once_with(cli.team_application.TeamAction.REMOVE, 2)
+
+    def _patch_collection(self, *, in_team: bool = False):
         rows = [dict(row) for row in storage.list_captures(self.conn)]
         for row in rows:
             row["types"] = None
         queries = MagicMock()
-        queries.available_for_team.return_value = rows
+        queries.available_for_team.return_value = [] if in_team else rows
+        queries.team.return_value = rows if in_team else []
         return patch.object(cli, "_collection_queries", return_value=queries)
 
     def test_empty_collection_cancels_selection(self):
         queries = MagicMock()
         queries.available_for_team.return_value = []
         with patch.object(cli, "_collection_queries", return_value=queries):
-            self.assertIsNone(cli._select_capture_for_team())
+            self.assertIsNone(
+                cli._select_capture_for_team(cli.team_application.TeamAction.ADD, None)
+            )
 
     def test_arrow_navigation_wraps_and_enter_selects(self):
         live = MagicMock()
@@ -157,7 +177,9 @@ class TeamSelectorTests(unittest.TestCase):
             patch.object(cli, "Live", return_value=live),
         ):
             # list_captures ordena por fecha descendente: 3, 2, 1.
-            self.assertEqual(cli._select_capture_for_team(), 2)
+            self.assertEqual(
+                cli._select_capture_for_team(cli.team_application.TeamAction.ADD, None), 2
+            )
 
     def test_non_tty_interrupt_cancels_selection(self):
         with (
@@ -165,7 +187,9 @@ class TeamSelectorTests(unittest.TestCase):
             patch.object(cli.sys.stdin, "isatty", return_value=False),
             patch("builtins.input", side_effect=KeyboardInterrupt),
         ):
-            self.assertIsNone(cli._select_capture_for_team())
+            self.assertIsNone(
+                cli._select_capture_for_team(cli.team_application.TeamAction.ADD, None)
+            )
 
     def test_tty_interrupt_cancels_selection(self):
         live = MagicMock()
@@ -176,7 +200,38 @@ class TeamSelectorTests(unittest.TestCase):
             patch.object(cli, "_read_menu_key", side_effect=KeyboardInterrupt),
             patch.object(cli, "Live", return_value=live),
         ):
-            self.assertIsNone(cli._select_capture_for_team())
+            self.assertIsNone(
+                cli._select_capture_for_team(cli.team_application.TeamAction.ADD, None)
+            )
+
+    def test_name_returns_single_match_and_duplicate_opens_selector(self):
+        rows = [dict(row) for row in storage.list_captures(self.conn)]
+        rows[0]["species"] = "eevee"
+        rows[1]["species"] = "eevee"
+        rows[2]["species"] = "pikachu"
+        for row in rows:
+            row["types"] = None
+        queries = MagicMock()
+        queries.available_for_team.return_value = rows
+
+        with patch.object(cli, "_collection_queries", return_value=queries):
+            self.assertEqual(
+                cli._select_capture_for_team(cli.team_application.TeamAction.ADD, "pikachu"),
+                rows[2]["id"],
+            )
+
+        live = MagicMock()
+        live.__enter__.return_value = live
+        with (
+            patch.object(cli, "_collection_queries", return_value=queries),
+            patch.object(cli.sys.stdin, "isatty", return_value=True),
+            patch.object(cli, "_read_menu_key", side_effect=["down", "enter"]),
+            patch.object(cli, "Live", return_value=live),
+        ):
+            self.assertEqual(
+                cli._select_capture_for_team(cli.team_application.TeamAction.ADD, "eevee"),
+                rows[1]["id"],
+            )
 
 
 class EvolutionHookTests(unittest.TestCase):

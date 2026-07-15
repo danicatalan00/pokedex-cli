@@ -90,6 +90,18 @@ def species_data() -> species_application.GetSpeciesData:
     )
 
 
+def refresh_species_data() -> species_application.RefreshSpeciesData:
+    cache = SQLiteSpeciesCacheRepository(paths.DB_PATH)
+    return species_application.RefreshSpeciesData(
+        catalog=cache,
+        species=species_application.GetSpeciesData(
+            cache=cache,
+            api=TolerantPokeApiClient(),
+            clock=lambda: datetime.now(timezone.utc),
+        ),
+    )
+
+
 def sprite_renderer() -> KrabbyClient:
     return KrabbyClient(pokemon_json_path=paths.KRABBY_POKEMON_JSON)
 

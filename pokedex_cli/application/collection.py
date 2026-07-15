@@ -58,7 +58,8 @@ class CollectionQueries:
         )
 
     def team(self) -> list[CaptureView]:
-        return [row for row in self.captures() if bool(row["in_team"])]
+        rows = [row for row in self.captures() if bool(row["in_team"])]
+        return sorted(rows, key=lambda row: (-int(row["level"]), int(row["id"])))
 
     def available_for_team(self) -> list[CaptureView]:
         return [row for row in self.captures() if not bool(row["in_team"])]

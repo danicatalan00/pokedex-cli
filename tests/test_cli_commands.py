@@ -134,10 +134,8 @@ def test_team_validates_remove_and_add_identifiers(connection, monkeypatch, caps
     )
     monkeypatch.setattr(cli, "_manage_team_use_case", lambda: use_case)
 
-    assert cli.cmd_equipo(argparse.Namespace(accion="remove", id=None)) == 1
     assert cli.cmd_equipo(argparse.Namespace(accion="add", id=999)) == 1
     output = capsys.readouterr().out
-    assert "Uso:" in output
     assert "No existe" in output
 
     capture_id = add_capture(connection, in_team=True)
@@ -149,6 +147,25 @@ def test_team_validates_remove_and_add_identifiers(connection, monkeypatch, caps
         cli.team_application.TeamAction.ADD,
         capture_id,
     )
+
+
+@pytest.mark.parametrize("action", ["add", "remove"])
+def test_team_name_delegates_resolution_to_scoped_selector(monkeypatch, action):
+    selected = MagicMock(return_value=7)
+    monkeypatch.setattr(cli, "_select_capture_for_team", selected)
+    use_case = MagicMock()
+    use_case.execute.return_value = cli.team_application.TeamResult(
+        cli.team_application.TeamStatus.ADDED
+        if action == "add"
+        else cli.team_application.TeamStatus.REMOVED,
+        7,
+    )
+    monkeypatch.setattr(cli, "_manage_team_use_case", lambda: use_case)
+
+    assert cli.cmd_equipo(argparse.Namespace(accion=action, id="eevee")) == 0
+    expected_action = cli.team_application.TeamAction(action)
+    selected.assert_called_once_with(expected_action, "eevee")
+    use_case.execute.assert_called_once_with(expected_action, 7)
 
 
 @pytest.mark.parametrize(
@@ -251,3 +268,18 @@ def test_completion_reads_project_file_then_reports_missing(monkeypatch, tmp_pat
     monkeypatch.setattr(cli.Path, "home", lambda: tmp_path / "missing-home")
     assert cli.cmd_completion(argparse.Namespace(shell="zsh")) == 1
     assert "No hay autocompletado" in capsys.readouterr().err
+
+
+def test_refresh_reports_successes_and_failures(monkeypatch, capsys):
+    use_case = MagicMock()
+    use_case.execute.return_value = cli.species_application.RefreshResult(
+        total=2,
+        refreshed=1,
+        failed=(cli.species_application.SpeciesIdentity("slowking", "galar"),),
+    )
+    monkeypatch.setattr(cli.composition, "refresh_species_data", lambda: use_case)
+
+    assert cli.cmd_refresh(argparse.Namespace()) == 1
+    output = capsys.readouterr().out
+    assert "1 de 2" in output
+    assert "slowking (galar)" in output

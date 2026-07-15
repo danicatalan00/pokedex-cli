@@ -110,3 +110,17 @@ def test_collection_prepares_experience_progress_for_presentation():
     assert progressing["is_max_level"] is False
     assert maximum["is_max_level"] is True
     assert maximum["experience_for_next_level"] == 0
+
+
+def test_team_is_sorted_by_descending_level_then_capture_id():
+    service = CollectionQueries(
+        Repository(
+            [
+                row(8, "eevee", team=True, level=12),
+                row(3, "pikachu", team=True, level=30),
+                row(2, "raichu", team=True, level=30),
+            ]
+        )
+    )
+
+    assert [item["id"] for item in service.team()] == [2, 3, 8]

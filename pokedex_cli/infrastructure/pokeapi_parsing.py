@@ -19,6 +19,10 @@ STAT_NAME_MAP = {
 JsonObject = dict[str, Any]
 JsonFetcher = Callable[[str], JsonObject | None]
 
+# PokeAPI separa Meltan y Melmetal en dos evolution-chain distintas aunque
+# pokemon-species/melmetal sí declara que evoluciona de Meltan.
+MISSING_CHAIN_EVOLUTIONS = {"meltan": (("melmetal", "regular"),)}
+
 
 def _get_json(url: str) -> JsonObject | None:
     try:
@@ -59,6 +63,7 @@ def _pokemon_stats_and_types(pokemon_json: JsonObject) -> JsonObject:
 
 def _level_evolutions(
     species_json: JsonObject,
+    pokemon_json: JsonObject,
     species: str,
     form: str,
     fetch_json: JsonFetcher | None = None,
@@ -69,77 +74,135 @@ def _level_evolutions(
     if not chain_json:
         return []
 
+    root = chain_json.get("chain", {})
     current_form_name = species if form == "regular" else f"{species}-{form}"
-    # Una misma evolucion puede tener reglas distintas por version. Conservamos
-    # la primera version cronologica (Rojo/Azul para la Gen I), no el nivel mas
-    # bajo introducido años despues.
-    found: dict[tuple[str, str], tuple[int, JsonObject]] = {}
 
-    def walk(node: JsonObject) -> None:
-        if node.get("species", {}).get("name") == species:
-            for child in node.get("evolves_to", []):
-                target = child.get("species", {}).get("name")
-                for detail in child.get("evolution_details", []):
-                    trigger = detail.get("trigger", {}).get("name")
-                    extra_conditions = (
-                        "gender",
-                        "held_item",
-                        "item",
-                        "known_move",
-                        "known_move_type",
-                        "location",
-                        "min_affection",
-                        "min_beauty",
-                        "min_happiness",
-                        "min_damage_taken",
-                        "min_move_count",
-                        "min_steps",
-                        "near_special_rock",
-                        "needs_multiplayer",
-                        "needs_overworld_rain",
-                        "party_species",
-                        "party_type",
-                        "region",
-                        "relative_physical_stats",
-                        "time_of_day",
-                        "trade_species",
-                        "turn_upside_down",
-                        "used_move",
-                    )
-                    is_pure_level = not any(detail.get(key) for key in extra_conditions)
-                    base_form = detail.get("base_form")
-                    base_form_name = base_form.get("name") if base_form else None
-                    matches_form = (
-                        form == "regular" and base_form_name is None
-                    ) or base_form_name == current_form_name
-                    if (
-                        trigger != "level-up"
-                        or not detail.get("min_level")
-                        or not matches_form
-                        or not is_pure_level
-                    ):
-                        continue
-                    evolved_form = detail.get("evolved_form")
-                    evolved_name = evolved_form.get("name") if evolved_form else target
-                    target_form = "regular"
-                    if evolved_name and target and evolved_name.startswith(target + "-"):
-                        target_form = evolved_name[len(target) + 1 :]
-                    option = {
-                        "species": target,
-                        "form": target_form,
-                        "min_level": int(detail["min_level"]),
-                    }
-                    version_url = detail.get("version_group", {}).get("url", "")
-                    match = re.search(r"/(\d+)/?$", version_url)
-                    version_order = int(match.group(1)) if match else 10_000
-                    key = (target, target_form)
-                    if target and (key not in found or version_order < found[key][0]):
-                        found[key] = (version_order, option)
+    def version_order(detail: JsonObject) -> int:
+        version_url = detail.get("version_group", {}).get("url", "")
+        match = re.search(r"/(\d+)/?$", version_url)
+        return int(match.group(1)) if match else 10_000
+
+    def path_to(node: JsonObject, name: str) -> list[JsonObject] | None:
+        if node.get("species", {}).get("name") == name:
+            return [node]
         for child in node.get("evolves_to", []):
-            walk(child)
+            path = path_to(child, name)
+            if path is not None:
+                return [node, *path]
+        return None
 
-    walk(chain_json.get("chain", {}))
-    return [entry[1] for entry in sorted(found.values(), key=lambda entry: entry[0])]
+    def maximum_depth(node: JsonObject) -> int:
+        children = node.get("evolves_to", [])
+        return 0 if not children else 1 + max(maximum_depth(child) for child in children)
+
+    def matches_base_form(detail: JsonObject) -> bool:
+        base_form = detail.get("base_form")
+        base_form_name = base_form.get("name") if base_form else None
+        return (form == "regular" and base_form_name is None) or (
+            base_form_name == current_form_name
+        )
+
+    def target_form(detail: JsonObject, target: str) -> str:
+        evolved_form = detail.get("evolved_form")
+        evolved_name = evolved_form.get("name") if evolved_form else target
+        if evolved_name and evolved_name.startswith(target + "-"):
+            return str(evolved_name[len(target) + 1 :])
+        return "regular"
+
+    def representative(details: list[JsonObject]) -> JsonObject:
+        defaults = [detail for detail in details if detail.get("is_default") is True]
+        return min(defaults or details, key=version_order)
+
+    def learned_move_level(detail: JsonObject) -> int | None:
+        required = detail.get("known_move") or detail.get("used_move")
+        required_name = required.get("name") if required else None
+        version_name = detail.get("version_group", {}).get("name")
+        if not required_name or not version_name:
+            return None
+        for move in pokemon_json.get("moves", []):
+            if move.get("move", {}).get("name") != required_name:
+                continue
+            levels = [
+                int(entry["level_learned_at"])
+                for entry in move.get("version_group_details", [])
+                if entry.get("version_group", {}).get("name") == version_name
+                and entry.get("move_learn_method", {}).get("name") == "level-up"
+                and int(entry.get("level_learned_at") or 0) > 0
+            ]
+            return min(levels) if levels else None
+        return None
+
+    path = path_to(root, species)
+    if path is None:
+        return []
+    current = path[-1]
+    grouped: dict[tuple[str, str], list[JsonObject]] = {}
+    order: list[tuple[str, str]] = []
+    for child in current.get("evolves_to", []):
+        target = child.get("species", {}).get("name")
+        if not target:
+            continue
+        details = child.get("evolution_details", [])
+        if not details and form == "regular":
+            key = (str(target), "regular")
+            grouped[key] = [{}]
+            order.append(key)
+        for detail in details:
+            if not matches_base_form(detail):
+                continue
+            key = (str(target), target_form(detail, str(target)))
+            if key not in grouped:
+                grouped[key] = []
+                order.append(key)
+            grouped[key].append(detail)
+
+    if not grouped and form == "regular":
+        for target, evolved_form in MISSING_CHAIN_EVOLUTIONS.get(species, ()):
+            key = (target, evolved_form)
+            grouped[key] = [{}]
+            order.append(key)
+
+    selected = {key: representative(details) for key, details in grouped.items()}
+    exact_levels: dict[tuple[str, str], int] = {}
+    for key, detail in selected.items():
+        level_details = [
+            candidate for candidate in grouped[key] if int(candidate.get("min_level") or 0) > 0
+        ]
+        explicit_detail = representative(level_details) if level_details else {}
+        explicit = int(explicit_detail.get("min_level") or 0)
+        learned = learned_move_level(detail)
+        if explicit > 0:
+            exact_levels[key] = explicit
+        elif learned is not None:
+            exact_levels[key] = learned
+
+    sibling_level = min(exact_levels.values()) if exact_levels else None
+    chain_depth = maximum_depth(root)
+    current_depth = len(path) - 1
+    if species_json.get("is_baby") or (current_depth == 0 and chain_depth >= 2):
+        family_level = 20
+    elif current_depth >= 1 and chain_depth >= 2:
+        family_level = 36
+    else:
+        family_level = 30
+
+    previous_explicit = 0
+    if current_depth > 0:
+        for detail in current.get("evolution_details", []):
+            evolved_form = detail.get("evolved_form")
+            evolved_name = evolved_form.get("name") if evolved_form else species
+            if evolved_name == current_form_name:
+                previous_explicit = max(previous_explicit, int(detail.get("min_level") or 0))
+    inferred_level = max(sibling_level or family_level, previous_explicit + 10)
+
+    return [
+        {
+            "species": key[0],
+            "form": key[1],
+            "min_level": exact_levels.get(key, inferred_level),
+        }
+        for key in order
+    ]
 
 
 def fetch_species_data(species: str, form: str) -> JsonObject | None:

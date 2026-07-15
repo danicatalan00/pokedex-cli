@@ -25,6 +25,7 @@ from pokedex_cli.application import evolutions as evolution_application
 from pokedex_cli.application import hook as hook_application
 from pokedex_cli.application import species as species_application
 from pokedex_cli.application import team as team_application
+from pokedex_cli.domain.identity import normalize_species
 from pokedex_cli.domain.models import Ball
 
 console = Console()
@@ -324,11 +325,17 @@ def _read_menu_key() -> str:
     }.get(key, "other")
 
 
-def _team_picker_table(rows: list[dict], selected: int, window_size: int = 10) -> Table:
+def _team_picker_table(
+    rows: list[dict],
+    selected: int,
+    action: team_application.TeamAction,
+    window_size: int = 10,
+) -> Table:
     start = max(0, min(selected - window_size // 2, len(rows) - window_size))
     visible = rows[start : start + window_size]
+    verb = "añadir" if action is team_application.TeamAction.ADD else "quitar"
     table = Table(
-        title="Elige un Pokémon · ↑/↓ mover · Enter añadir · q cancelar",
+        title=f"Elige un Pokémon · ↑/↓ mover · Enter {verb} · q cancelar",
         box=None,
     )
     table.add_column("", width=2)
@@ -355,18 +362,41 @@ def _team_picker_table(rows: list[dict], selected: int, window_size: int = 10) -
     return table
 
 
-def _select_capture_for_team() -> int | None:
-    rows = _collection_queries().available_for_team()
+def _select_capture_for_team(action: team_application.TeamAction, name: str | None) -> int | None:
+    queries = _collection_queries()
+    rows = (
+        queries.available_for_team()
+        if action is team_application.TeamAction.ADD
+        else queries.team()
+    )
+    if name is not None:
+        expected = normalize_species(name)
+        rows = [
+            row
+            for row in rows
+            if row["species"] == expected
+            or normalize_species(_display_name(row["species"], row["form"])) == expected
+            or normalize_species(f"{row['species']}-{row['form']}") == expected
+        ]
     if not rows:
-        console.print("No tienes más Pokémon fuera del equipo para añadir.")
+        if name is not None:
+            scope = "fuera" if action is team_application.TeamAction.ADD else "dentro"
+            console.print(f"No tienes ninguna captura de [bold]{name}[/] {scope} del equipo.")
+        elif action is team_application.TeamAction.ADD:
+            console.print("No tienes más Pokémon fuera del equipo para añadir.")
+        else:
+            console.print("Tu equipo está vacío.")
         return None
+    if len(rows) == 1 and name is not None:
+        return int(rows[0]["id"])
 
     # Si stdin no es interactivo (script/pipe), conserva una alternativa que
     # no depende de secuencias ANSI ni modo raw.
     if not sys.stdin.isatty():
         display.render_list_table(console, rows)
+        verb = "añadir" if action is team_application.TeamAction.ADD else "quitar"
         try:
-            answer = input("ID para añadir (vacío cancela): ").strip()
+            answer = input(f"ID para {verb} (vacío cancela): ").strip()
         except (EOFError, KeyboardInterrupt):
             return None
         valid = {str(row["id"]): row["id"] for row in rows}
@@ -374,7 +404,7 @@ def _select_capture_for_team() -> int | None:
 
     selected = 0
     with Live(
-        _team_picker_table(rows, selected),
+        _team_picker_table(rows, selected, action),
         console=console,
         auto_refresh=False,
         transient=True,
@@ -392,7 +422,7 @@ def _select_capture_for_team() -> int | None:
                 return int(rows[selected]["id"])
             elif key == "cancel":
                 return None
-            live.update(_team_picker_table(rows, selected), refresh=True)
+            live.update(_team_picker_table(rows, selected, action), refresh=True)
 
 
 def cmd_vision(args: argparse.Namespace) -> int:
@@ -421,34 +451,35 @@ def cmd_vision(args: argparse.Namespace) -> int:
 
 
 def cmd_equipo(args: argparse.Namespace) -> int:
-    if args.accion == "remove" and args.id is None:
-        print("Uso: pokedex equipo remove <id>")
-        return 1
-    if args.accion == "add":
-        capture_id = args.id if args.id is not None else _select_capture_for_team()
+    if args.accion is not None:
+        action = team_application.TeamAction(args.accion)
+        raw_identifier = args.id
+        if raw_identifier is not None and str(raw_identifier).isdigit():
+            capture_id = int(raw_identifier)
+        else:
+            capture_id = _select_capture_for_team(action, raw_identifier)
         if capture_id is None:
             return 0
-        result = _manage_team_use_case().execute(team_application.TeamAction.ADD, capture_id)
+        result = _manage_team_use_case().execute(action, capture_id)
         if result.status is team_application.TeamStatus.NOT_FOUND:
             print(f"No existe ninguna captura con id {capture_id}.")
             return 1
-        if result.status is team_application.TeamStatus.ALREADY_MEMBER:
-            print(f"La captura #{capture_id} ya está en el equipo.")
-            return 0
-        if result.status is team_application.TeamStatus.FULL:
-            print("Tu equipo ya tiene 6 Pokémon. Quita uno con `pokedex equipo remove <id>`.")
-            return 1
-        print(f"Añadido al equipo (#{capture_id}).")
-        return 0
-    if args.accion == "remove":
-        result = _manage_team_use_case().execute(team_application.TeamAction.REMOVE, args.id)
-        if result.status is team_application.TeamStatus.NOT_FOUND:
-            print(f"No existe ninguna captura con id {args.id}.")
-            return 1
-        if result.status is team_application.TeamStatus.ALREADY_REMOVED:
-            print(f"La captura #{args.id} ya estaba fuera del equipo.")
-            return 0
-        print(f"Quitado del equipo (#{args.id}).")
+        if action is team_application.TeamAction.ADD:
+            if result.status is team_application.TeamStatus.ALREADY_MEMBER:
+                print(f"La captura #{capture_id} ya está en el equipo.")
+                return 0
+            if result.status is team_application.TeamStatus.FULL:
+                print(
+                    "Tu equipo ya tiene 6 Pokémon. "
+                    "Quita uno con `pokedex equipo remove [id|nombre]`."
+                )
+                return 1
+            print(f"Añadido al equipo (#{capture_id}).")
+        else:
+            if result.status is team_application.TeamStatus.ALREADY_REMOVED:
+                print(f"La captura #{capture_id} ya estaba fuera del equipo.")
+                return 0
+            print(f"Quitado del equipo (#{capture_id}).")
         return 0
     display.render_team_panel(console, _collection_queries().team())
     return 0
@@ -570,6 +601,19 @@ def cmd_completion(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_refresh(args: argparse.Namespace) -> int:
+    """Reemplaza la caché PokeAPI de todas las especies capturadas."""
+    result = composition.refresh_species_data().execute()
+    print(f"Actualizados {result.refreshed} de {result.total} perfiles capturados.")
+    if not result.failed:
+        return 0
+    print("No se pudieron actualizar:")
+    for identity in result.failed:
+        suffix = "" if identity.form == "regular" else f" ({identity.form})"
+        print(f"  - {identity.species}{suffix}")
+    return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pokedex",
@@ -588,6 +632,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  pokedex list                    tus capturas\n"
             "  pokedex search charizard -f mega-x     ficha de una forma concreta\n"
             "  pokedex equipo add 3            mete la captura #3 en tu equipo\n"
+            "  pokedex refresh                 recarga los datos de tus capturas\n"
             "  pokedex demo                    prueba la animación sin capturar\n"
             "  pokedex demo -L                 pruébala contra un legendario al azar\n"
             "  pokedex demo-evolucion bulbasaur ivysaur  prueba una evolución\n"
@@ -697,8 +742,8 @@ def build_parser() -> argparse.ArgumentParser:
     equipo_parser = subparsers.add_parser(
         "equipo",
         help="ve o gestiona tu equipo (máx. 6)",
-        description="Sin argumentos muestra tu equipo. `add` abre un selector; "
-        "add/remove <id> permite gestionarlo directamente.",
+        description="Sin argumentos muestra tu equipo. `add` y `remove` abren un "
+        "selector; también aceptan directamente un ID o nombre.",
     )
     equipo_parser.add_argument(
         "accion",
@@ -710,8 +755,8 @@ def build_parser() -> argparse.ArgumentParser:
     equipo_parser.add_argument(
         "id",
         nargs="?",
-        type=int,
-        help="id de captura; si se omite en `add`, abre el selector interactivo",
+        metavar="ID|NOMBRE",
+        help="id o nombre de Pokémon; si se omite, abre el selector interactivo",
     )
     equipo_parser.set_defaults(func=cmd_equipo)
 
@@ -735,6 +780,14 @@ def build_parser() -> argparse.ArgumentParser:
         description="Muestra los legendarios y singulares que has capturado.",
     )
     legendarios_parser.set_defaults(func=cmd_legendarios)
+
+    refresh_parser = subparsers.add_parser(
+        "refresh",
+        help="borra y recarga los datos PokeAPI de tus capturas",
+        description="Vacía la caché local de especies y vuelve a consultar PokeAPI "
+        "para cada combinación de especie y forma que hayas capturado.",
+    )
+    refresh_parser.set_defaults(func=cmd_refresh)
 
     demo_parser = subparsers.add_parser(
         "demo",

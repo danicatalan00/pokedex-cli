@@ -44,6 +44,7 @@ if [[ -f "$ZSHRC" ]] && ! grep -qF 'pokedex-cli: autocompletado' "$ZSHRC"; then
             !inserted && index($0, "source $ZSH/oh-my-zsh.sh") {
                 print "# pokedex-cli: autocompletado (antes del compinit de oh-my-zsh)"
                 print "fpath=(\"$HOME/.zfunc\" $fpath)"
+                print "unfunction _pokedex 2>/dev/null"
                 print ""
                 inserted = 1
             }
@@ -55,12 +56,30 @@ if [[ -f "$ZSHRC" ]] && ! grep -qF 'pokedex-cli: autocompletado' "$ZSHRC"; then
 
 # pokedex-cli: autocompletado
 fpath=("$HOME/.zfunc" $fpath)
+unfunction _pokedex 2>/dev/null
 autoload -Uz compinit && compinit
 ZBLOCK
         echo "Añadido ~/.zfunc al fpath en ~/.zshrc para el autocompletado."
     fi
-    # Fuerza a compinit a regenerar su caché para que recoja el nuevo completado.
-    rm -f "$HOME"/.zcompdump* 2>/dev/null || true
 fi
+
+if ! grep -qF 'unfunction _pokedex 2>/dev/null' "$ZSHRC"; then
+    TMP="$(mktemp)"
+    awk '
+        { print }
+        !inserted && index($0, "# pokedex-cli: autocompletado") {
+            marker = 1
+            next
+        }
+        marker && !inserted && index($0, "fpath=(") {
+            print "unfunction _pokedex 2>/dev/null"
+            inserted = 1
+        }
+    ' "$ZSHRC" > "$TMP" && mv "$TMP" "$ZSHRC"
+fi
+
+# El archivo puede cambiar aunque el bloque de ~/.zshrc ya existiera. Invalida
+# siempre el dump y la función en memoria se descargará con el próximo source.
+rm -f "$HOME"/.zcompdump* 2>/dev/null || true
 
 echo "Listo. Abre una terminal nueva o \`source ~/.zshrc\`."

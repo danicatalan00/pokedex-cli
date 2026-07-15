@@ -35,6 +35,7 @@ _pokedex() {
     'tipos:desglose de tus capturas por tipo'
     'ranking:ranking por suma de stats base'
     'legendarios:tu salón de la fama de legendarios'
+    'refresh:borra y recarga los datos PokeAPI de tus capturas'
     'demo:prueba la animación de captura sin guardar nada'
     'demo-evolucion:prueba la animación de evolución sin guardar nada'
     'completion:imprime el script de autocompletado'
@@ -93,7 +94,9 @@ _pokedex() {
           if (( CURRENT == 2 )); then
             _values 'acción' 'add[añade una captura]' 'remove[quita una captura]'
           else
-            _pokedex_capture_ids
+            _alternative \
+              'ids:id de captura:_pokedex_capture_ids' \
+              'pokemon:nombre del Pokémon:_pokedex_pokemon_names'
           fi
           ;;
         hook)

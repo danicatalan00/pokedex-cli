@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from pokedex_cli.application.evolutions import PendingEvolution
+from pokedex_cli.application.species import SpeciesIdentity
 from pokedex_cli.application.training import TeamMember
 from pokedex_cli.domain.evolutions import EvolutionOption
 from pokedex_cli.domain.models import Encounter as EncounterModel
@@ -385,6 +386,27 @@ class SQLiteSpeciesCacheRepository:
                     fetched_at,
                 ),
             )
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def captured(self) -> tuple[SpeciesIdentity, ...]:
+        connection = database.connect(self.database_path)
+        try:
+            rows = connection.execute(
+                "SELECT DISTINCT species, form FROM captures ORDER BY species, form"
+            ).fetchall()
+            return tuple(SpeciesIdentity(str(row["species"]), str(row["form"])) for row in rows)
+        finally:
+            connection.close()
+
+    def clear(self) -> None:
+        connection = database.connect(self.database_path)
+        try:
+            connection.execute("DELETE FROM species_cache")
             connection.commit()
         except BaseException:
             connection.rollback()

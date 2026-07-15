@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
@@ -55,3 +56,44 @@ class GetSpeciesData:
         fetched_at = now.astimezone(timezone.utc).isoformat()
         self._cache.put(species, form, fetched, fetched_at)
         return self._cache.get(species, form)
+
+
+@dataclass(frozen=True)
+class SpeciesIdentity:
+    species: str
+    form: str
+
+
+@dataclass(frozen=True)
+class RefreshResult:
+    total: int
+    refreshed: int
+    failed: tuple[SpeciesIdentity, ...]
+
+
+class RefreshCatalog(Protocol):
+    def captured(self) -> tuple[SpeciesIdentity, ...]: ...
+
+    def clear(self) -> None: ...
+
+
+class SpeciesRefresher(Protocol):
+    def execute(self, species: str, form: str, *, refresh: bool = False) -> SpeciesData | None: ...
+
+
+class RefreshSpeciesData:
+    """Replace cached PokeAPI profiles for every captured species and form."""
+
+    def __init__(self, *, catalog: RefreshCatalog, species: SpeciesRefresher) -> None:
+        self._catalog = catalog
+        self._species = species
+
+    def execute(self) -> RefreshResult:
+        identities = self._catalog.captured()
+        self._catalog.clear()
+        failed: list[SpeciesIdentity] = []
+        for identity in identities:
+            data = self._species.execute(identity.species, identity.form, refresh=True)
+            if data is None:
+                failed.append(identity)
+        return RefreshResult(len(identities), len(identities) - len(failed), tuple(failed))

@@ -24,6 +24,7 @@ SUBCOMMANDS = [
     "legendarios",
     "demo",
     "demo-evolucion",
+    "refresh",
     "completion",
 ]
 
