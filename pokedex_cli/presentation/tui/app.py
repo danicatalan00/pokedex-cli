@@ -410,9 +410,10 @@ class PokedexApp(App[None]):
 
     BINDINGS = [
         Binding("q", "quit", "Salir"),
-        Binding("slash", "focus_search", "Buscar", key_display="/"),
+        Binding("slash,divide", "focus_search", "Buscar", key_display="/"),
         Binding("f", "cycle_status", "Filtro"),
         Binding("g", "cycle_gen", "Gen"),
+        Binding("escape", "clear_filters", "Limpiar filtros", show=False),
         Binding("enter", "open_detail", "Detalle", show=True, priority=False),
     ]
 
@@ -762,6 +763,12 @@ class PokedexApp(App[None]):
     def action_cycle_gen(self) -> None:
         self._gen_filter = presenter.next_gen_filter(self._gen_filter)
         self._apply_filters()
+
+    def action_clear_filters(self) -> None:
+        if self._status_filter is not None or self._gen_filter is not None:
+            self._status_filter = None
+            self._gen_filter = None
+            self._apply_filters()
 
     def action_open_detail(self) -> None:
         entry = self._selected_entry()

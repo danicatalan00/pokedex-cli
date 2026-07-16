@@ -49,6 +49,15 @@ Apaga el cerebro y dirige tu agente de código hacia [INSTALL.md](INSTALL.md).
 | `pokedex refresh` | Borrar y recargar desde PokeAPI los datos de las capturas |
 | `pokedex demo` | Probar animaciones sin guardar estado |
 
+## Pokédex interactiva
+
+Ejecuta `pokedex` sin argumentos para abrir la colección en una vista de lista.
+Puedes buscar por nombre o número, filtrar por estado y generación, y consultar
+los datos de cada Pokémon capturado.
+
+<p align="center">
+  <img src="docs/assets/pokedex-charizard.svg" width="1100" alt="Pokédex interactiva con Charizard seleccionado en la vista de lista">
+</p>
 
 ## Documentación
 

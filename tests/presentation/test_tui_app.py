@@ -127,10 +127,29 @@ def test_filtro_de_estado_y_generacion() -> None:
     asyncio.run(scenario())
 
 
+def test_escape_limpia_los_filtros_de_lista() -> None:
+    async def scenario() -> None:
+        app = _app()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press("f", "g")
+            assert app._status_filter == "captured"
+            assert app._gen_filter == 1
+
+            await pilot.press("escape")
+
+            assert app._status_filter is None
+            assert app._gen_filter is None
+            assert app._filtered == ENTRIES
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
 def test_busqueda_en_vivo_por_nombre_y_numero() -> None:
     async def scenario() -> None:
         app = _app()
         async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press("f")
             await pilot.press("slash")
             await pilot.press(*"pika")
             assert [entry.slug for entry in app._filtered] == ["pikachu"]
@@ -140,6 +159,19 @@ def test_busqueda_en_vivo_por_nombre_y_numero() -> None:
             assert [entry.slug for entry in app._filtered] == ["pikachu"]
             await pilot.press("escape")
             assert app.focused is app.query_one("#lista")
+            assert busqueda.value == "25"
+            assert app._status_filter == "captured"
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_divide_del_teclado_numerico_abre_la_busqueda() -> None:
+    async def scenario() -> None:
+        app = _app()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press("divide")
+            assert app.focused is app.query_one("#busqueda")
             await pilot.press("q")
 
     asyncio.run(scenario())
