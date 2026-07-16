@@ -33,7 +33,7 @@ terminal está explicada en la [guía de instalación](docs/installation.md).
 
 ## Inicio más rápido
 
-Apaga el cerebro y dirige tu agente de código hacia [INSTALL.md](INSTALL.md)
+Apaga el cerebro y dirige tu agente de código hacia [INSTALL.md](INSTALL.md).
 
 ## Comandos habituales
 

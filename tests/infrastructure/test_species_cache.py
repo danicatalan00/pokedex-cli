@@ -85,6 +85,10 @@ def test_refresh_catalog_lists_unique_captures_and_clears_all_cached_profiles(tm
             "INSERT INTO captures (species, form, shiny, caught_at) VALUES (?, ?, 0, 'now')",
             [("pichu", "regular"), ("pichu", "regular"), ("slowking", "galar")],
         )
+        connection.execute(
+            "INSERT INTO dex_caught (species, form, first_caught_at) "
+            "VALUES ('charmeleon', 'regular', 'before-evolving')"
+        )
         connection.commit()
     finally:
         connection.close()
@@ -92,6 +96,7 @@ def test_refresh_catalog_lists_unique_captures_and_clears_all_cached_profiles(tm
     repository.put("eevee", "regular", payload(), "now")
 
     assert [(item.species, item.form) for item in repository.captured()] == [
+        ("charmeleon", "regular"),
         ("pichu", "regular"),
         ("slowking", "galar"),
     ]

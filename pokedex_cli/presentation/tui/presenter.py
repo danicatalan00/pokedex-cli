@@ -11,12 +11,19 @@ from collections.abc import Sequence
 from pokedex_cli.application.pokedex_catalog import CAPTURED, SEEN, UNSEEN, CatalogEntry
 
 HIDDEN_NAME = "??????"
+TEXT_PRIMARY = "#241d12"
+TEXT_SECONDARY = "#49391f"
+TEXT_MUTED = "#5b4a2d"
+SECTION_TEXT = "#713500"
+DARK_GREEN = "#1f602b"
+DARK_RED = "#8a1f2d"
+DARK_AMBER = "#735500"
 
 # status -> (marker glyph, rich colour)
 STATUS_MARKERS: dict[str, tuple[str, str]] = {
-    CAPTURED: ("●", "red3"),
-    SEEN: ("◐", "yellow3"),
-    UNSEEN: ("·", "grey42"),
+    CAPTURED: ("●", DARK_RED),
+    SEEN: ("◐", DARK_AMBER),
+    UNSEEN: ("·", TEXT_MUTED),
 }
 
 # Cycle order for the `f` binding: Todos -> Capturados -> Vistos -> Pendientes.
@@ -85,10 +92,69 @@ GROWTH_LABELS = {
     "medium-slow": "Medio-lento",
     "slow": "Lento",
 }
+TYPE_TEXT_COLORS = {
+    "normal": "#514d35",
+    "fire": "#9a2f18",
+    "water": "#174f8a",
+    "electric": "#6c5600",
+    "grass": "#256226",
+    "ice": "#17646b",
+    "fighting": "#7b281f",
+    "poison": "#68256f",
+    "ground": "#715115",
+    "flying": "#4b4380",
+    "psychic": "#8a2951",
+    "bug": "#596313",
+    "rock": "#66581d",
+    "ghost": "#4f3b70",
+    "dragon": "#43258d",
+    "dark": "#43382f",
+    "steel": "#4f5362",
+    "fairy": "#843f59",
+}
 
 
 def _human_label(value: str) -> str:
     return value.replace("-", " ").title()
+
+
+def type_badges(types: Sequence[str]) -> str:
+    return " ".join(f"[{TYPE_TEXT_COLORS.get(item, TEXT_PRIMARY)}]{item}[/]" for item in types)
+
+
+def _stat_colour(value: int, *, current: bool = False) -> str:
+    thresholds = (350, 250, 180, 120, 70) if current else (130, 100, 80, 60, 40)
+    colours = ("#135b26", "#24682c", "#4d6518", "#705900", "#934500", DARK_RED)
+    for threshold, colour in zip(thresholds, colours):
+        if value >= threshold:
+            return colour
+    return colours[-1]
+
+
+def _stat_bar(value: int, *, width: int, maximum: int, current: bool = False) -> str:
+    filled = min(width, max(1, round(value / maximum * width))) if value else 0
+    colour = _stat_colour(value, current=current)
+    return f"[{colour}]{'█' * filled}[/][#65583c]{'━' * (width - filled)}[/]"
+
+
+def stat_bar_base(value: int, width: int = 12) -> str:
+    return _stat_bar(value, width=width, maximum=200)
+
+
+def stat_bar_current(value: int, width: int = 16) -> str:
+    return _stat_bar(value, width=width, maximum=400, current=True)
+
+
+def stat_colour_current(value: int) -> str:
+    return _stat_colour(value, current=True)
+
+
+def gender_suffix(gender: str | None) -> str:
+    if gender == "male":
+        return " [#18568a]♂[/]"
+    if gender == "female":
+        return " [#8a3159]♀[/]"
+    return ""
 
 
 def _fold(text: str) -> str:
@@ -148,7 +214,7 @@ def list_row_markup(entry: CatalogEntry) -> str:
     """One line of the national list: '#025 ● Pikachu ✨'."""
     marker, colour = STATUS_MARKERS[entry.status]
     name = visible_name(entry)
-    name_style = "dim" if entry.status == UNSEEN else "bold"
+    name_style = TEXT_MUTED if entry.status == UNSEEN else "bold"
     shiny = " ✨" if entry.any_shiny else ""
     return f"#{entry.idx:03d} [{colour}]{marker}[/] [{name_style}]{name}[/]{shiny}"
 
@@ -170,22 +236,22 @@ def detail_lines(entry: CatalogEntry, *, show_stat_bars: bool = False) -> list[s
     """
     if entry.status == UNSEEN:
         return [
-            f"[dim bold]{HIDDEN_NAME}[/]",
+            f"[bold {TEXT_MUTED}]{HIDDEN_NAME}[/]",
             "",
-            f"[dim]Gen {entry.gen} · especie sin identificar.[/]",
-            "[dim]Sigue abriendo terminales…[/]",
+            f"[{TEXT_MUTED}]Gen {entry.gen} · especie sin identificar.[/]",
+            f"[{TEXT_MUTED}]Sigue abriendo terminales…[/]",
         ]
-
-    from pokedex_cli.presentation import display
 
     lines = [f"[bold]#{entry.idx:03d} {visible_name(entry)}[/]"]
     if entry.types:
-        lines.append(display.type_badges(list(entry.types)))
-    lines.append(f"[grey62]Generación {entry.gen}[/]")
+        lines.append(type_badges(entry.types))
+    lines.append(f"[{TEXT_SECONDARY}]Generación {entry.gen}[/]")
 
     if entry.status != CAPTURED:
         lines.append("")
-        lines.append("[dim italic]Datos incompletos: captúralo para registrar su entrada.[/]")
+        lines.append(
+            f"[italic {TEXT_MUTED}]Datos incompletos: captúralo para registrar su entrada.[/]"
+        )
         return lines
 
     if entry.base_stats:
@@ -193,17 +259,17 @@ def detail_lines(entry: CatalogEntry, *, show_stat_bars: bool = False) -> list[s
         if show_stat_bars:
             for key, value in entry.base_stats:
                 label = STAT_SHORT_LABELS.get(key, key.upper())
-                bar = display.stat_bar_base(value, width=12)
-                colour = display.stat_color_base(value)
-                lines.append(f"[grey70]{label:>5}[/] {bar} [{colour}]{value:>3}[/]")
+                bar = stat_bar_base(value, width=12)
+                colour = _stat_colour(value)
+                lines.append(f"[{TEXT_SECONDARY}]{label:>5}[/] {bar} [{colour}]{value:>3}[/]")
         else:
             stats = " · ".join(
-                f"[grey70]{STAT_SHORT_LABELS.get(key, key.upper())}[/] [bold]{value}[/]"
+                f"[{TEXT_SECONDARY}]{STAT_SHORT_LABELS.get(key, key.upper())}[/] [bold]{value}[/]"
                 for key, value in entry.base_stats
             )
             lines.append(stats)
         total = sum(value for _, value in entry.base_stats)
-        lines.append(f"[grey70]Total[/] [bold]{total}[/] [dim](stats base)[/]")
+        lines.append(f"[{TEXT_SECONDARY}]Total[/] [bold]{total}[/] [{TEXT_MUTED}](stats base)[/]")
     if show_stat_bars:
         profile: list[str] = []
         if entry.genus:
@@ -234,7 +300,7 @@ def detail_lines(entry: CatalogEntry, *, show_stat_bars: bool = False) -> list[s
             )
             profile.append(f"Grupos huevo [bold]{groups}[/]")
         if profile:
-            lines.extend(["", "[bold dark_orange]PERFIL[/]", *profile])
+            lines.extend(["", f"[bold {SECTION_TEXT}]PERFIL[/]", *profile])
 
         training = []
         if entry.growth_rate:
@@ -252,14 +318,16 @@ def detail_lines(entry: CatalogEntry, *, show_stat_bars: bool = False) -> list[s
             abilities = ", ".join(_human_label(ability) for ability in entry.abilities)
             training.append(f"Habilidades [bold]{abilities}[/]")
         if training:
-            lines.extend(["", "[bold dark_orange]CRIANZA Y PROGRESIÓN[/]", *training])
+            lines.extend(["", f"[bold {SECTION_TEXT}]CRIANZA Y PROGRESIÓN[/]", *training])
     if entry.description:
         lines.append("")
-        lines.append(f"[italic grey85]{entry.description}[/]")
+        lines.append(f"[italic {TEXT_SECONDARY}]{entry.description}[/]")
     lines.append("")
     if entry.captures_count:
         if entry.any_shiny:
-            lines.append("[bold yellow1]✨ Variante shiny registrada[/]")
+            lines.append(f"[bold {DARK_AMBER}]✨ Variante shiny registrada[/]")
     else:
-        lines.append("[gold3]Registrado en tu Pokédex[/] [dim](la captura evolucionó)[/]")
+        lines.append(
+            f"[{DARK_AMBER}]Registrado en tu Pokédex[/] [{TEXT_MUTED}](la captura evolucionó)[/]"
+        )
     return lines

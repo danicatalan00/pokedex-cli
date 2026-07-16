@@ -247,7 +247,8 @@ class DetailScreen(Screen[None]):
             yield VerticalScroll(Static("", id="detalle-ficha"), id="detalle-datos")
         yield Static(
             Text.from_markup(
-                "[dim]←/→ familia · ↑/↓ Pokédex · ,/. individuo · Esc volver[/]",
+                f"[{presenter.TEXT_SECONDARY}]←/→ familia · ↑/↓ Pokédex · "
+                ",/. individuo · Esc volver[/]",
                 justify="center",
             ),
             id="detalle-pie",
@@ -316,7 +317,13 @@ class DetailScreen(Screen[None]):
         row = self._rows[self._index] if self._rows else None
         species_lines = presenter.detail_lines(self._entry, show_stat_bars=True)
         if row:
-            species_lines.extend(["", "[bold gold3]INDIVIDUO[/]", *self._individual_lines(row)])
+            species_lines.extend(
+                [
+                    "",
+                    f"[bold {presenter.SECTION_TEXT}]INDIVIDUO[/]",
+                    *self._individual_lines(row),
+                ]
+            )
         self.query_one("#detalle-ficha", Static).update(Text.from_markup("\n".join(species_lines)))
         self.query_one("#detalle-evoluciones", Static).update(self._evolution_strip())
         self.call_after_refresh(self._render_sprite)
@@ -350,10 +357,13 @@ class DetailScreen(Screen[None]):
     def _individual_lines(self, row: dict[str, Any]) -> list[str]:
         name = display.display_name(str(row["species"]), str(row["form"]))
         lines: list[str] = []
-        header = f"[bold]{name}[/]{display.gender_suffix(row.get('gender'))}"
+        header = f"[bold]{name}[/]{presenter.gender_suffix(row.get('gender'))}"
         if row.get("shiny"):
-            header += " [bold yellow1]✨[/]"
-        counter = f"[dim]captura {self._index + 1}/{len(self._rows)} · id #{row['id']}[/]"
+            header += f" [bold {presenter.DARK_AMBER}]✨[/]"
+        counter = (
+            f"[{presenter.TEXT_MUTED}]captura {self._index + 1}/{len(self._rows)} "
+            f"· id #{row['id']}[/]"
+        )
         lines.append(f"{header}   {counter}")
         lines.append(f"Nv. [bold]{row['level']}[/]")
         lines.append("")
@@ -363,20 +373,20 @@ class DetailScreen(Screen[None]):
         for label, key in display.STAT_LABELS:
             value = stats.get(key)
             if value is None:
-                lines.append(f"{label:>9}  [dim]sin datos[/]")
+                lines.append(f"{label:>9}  [{presenter.TEXT_MUTED}]sin datos[/]")
                 continue
             mark = "  "
             if nature is not None:
                 if nature.plus == key:
-                    mark = " [green3]▲[/]"
+                    mark = f" [{presenter.DARK_GREEN}]▲[/]"
                 elif nature.minus == key:
-                    mark = " [red3]▼[/]"
-            bar = display.stat_bar_current(int(value))
-            colour = display.stat_color_current(int(value))
+                    mark = f" [{presenter.DARK_RED}]▼[/]"
+            bar = presenter.stat_bar_current(int(value))
+            colour = presenter.stat_colour_current(int(value))
             base = row.get(key) or 0
             lines.append(
                 f"{label:>9}{mark} {bar} [bold {colour}]{value:>3}[/]"
-                f" [dim]base {base} · IV {ivs.get(key, 0)}[/]"
+                f" [{presenter.TEXT_MUTED}]base {base} · IV {ivs.get(key, 0)}[/]"
             )
         lines.append("")
         lines.append(display.nature_ability_markup(row))
@@ -385,9 +395,9 @@ class DetailScreen(Screen[None]):
     def _evolution_strip(self) -> Text:
         labels = []
         for index, entry in enumerate(self._family):
-            marker, colour = presenter.STATUS_MARKERS[entry.status]
+            marker, _ = presenter.STATUS_MARKERS[entry.status]
             name = presenter.visible_name(entry)
-            selected = "bold reverse" if index == self._family_index else colour
+            selected = "bold reverse" if index == self._family_index else presenter.TEXT_PRIMARY
             labels.append(f"[{selected}]{marker} #{entry.idx:03d} {name}[/]")
         return Text.from_markup("  →  ".join(labels), justify="center")
 
@@ -479,6 +489,8 @@ class PokedexApp(App[None]):
         padding: 0 2;
     }}
     Footer {{ background: {DEX_OLIVE}; color: {LCD_INK}; }}
+    Footer > .footer--key {{ background: {DEX_RULE}; color: {LCD_PAPER}; }}
+    Footer > .footer--description {{ background: {DEX_OLIVE}; color: {LCD_INK}; }}
     DetailScreen {{ background: {DEX_OLIVE}; color: {LCD_INK}; }}
     DetailScreen #detalle-cuerpo {{
         margin: 1 2;
@@ -603,7 +615,19 @@ class PokedexApp(App[None]):
                 continue
             family_slugs.add(slug)
             pending.extend(neighbours.get(slug, ()))
-        return sorted((by_slug[slug] for slug in family_slugs), key=lambda entry: entry.idx)
+        declared_orders = [
+            entry.evolution_family
+            for entry in self._entries
+            if selected.slug in entry.evolution_family
+        ]
+        declared = max(declared_orders, key=len, default=())
+        ordered_slugs = [slug for slug in declared if slug in family_slugs]
+        ordered_slugs.extend(
+            entry.slug
+            for entry in sorted(self._entries, key=lambda item: item.idx)
+            if entry.slug in family_slugs and entry.slug not in ordered_slugs
+        )
+        return [by_slug[slug] for slug in ordered_slugs]
 
     def _selected_entry(self) -> CatalogEntry | None:
         option_list = self.query_one("#lista", OptionList)
@@ -644,7 +668,7 @@ class PokedexApp(App[None]):
         header = (
             "[#85ddff]◉[/][#28aafd]◉[/]  [red1]●[/][yellow1]●[/][green1]●[/]"
             f"   [bold #241d12]POKÉDEX[/]   [#352a18]{progress}[/]"
-            f"   [dim]f: {status_label} · g: {gen_label}[/]"
+            f"   [{presenter.TEXT_SECONDARY}]f: {status_label} · g: {gen_label}[/]"
         )
         self.query_one("#cabecera", Static).update(Text.from_markup(header))
 
@@ -655,7 +679,7 @@ class PokedexApp(App[None]):
         ficha = self.query_one("#ficha-texto", Static)
         if entry is None:
             screen_widget.show(_ScreenContent([], ansi=False))
-            ficha.update(Text.from_markup("[dim]Sin resultados.[/]"))
+            ficha.update(Text.from_markup(f"[{presenter.TEXT_MUTED}]Sin resultados.[/]"))
             return
         ficha.update(Text.from_markup("\n".join(presenter.detail_lines(entry))))
         # Estática breve mientras krabby responde; el render final depende del

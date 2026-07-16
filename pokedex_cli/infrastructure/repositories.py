@@ -478,7 +478,9 @@ class SQLiteSpeciesCacheRepository:
         connection = database.connect(self.database_path)
         try:
             rows = connection.execute(
-                "SELECT DISTINCT species, form FROM captures ORDER BY species, form"
+                "SELECT species, form FROM captures "
+                "UNION SELECT species, form FROM dex_caught "
+                "ORDER BY species, form"
             ).fetchall()
             return tuple(SpeciesIdentity(str(row["species"]), str(row["form"])) for row in rows)
         finally:

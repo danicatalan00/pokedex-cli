@@ -96,6 +96,48 @@ def test_seen_and_captured_species_names_are_visible():
     assert "Pikachu" in presenter.list_row_markup(pikachu)
 
 
+def test_light_theme_markup_uses_dark_readable_text_colours() -> None:
+    entries = [
+        dataclasses.replace(ENTRIES[0], types=("electric",), description="Descripción."),
+        *ENTRIES[1:],
+    ]
+    markup = "\n".join(
+        [presenter.list_row_markup(item) for item in entries]
+        + [line for item in entries for line in presenter.detail_lines(item, show_stat_bars=True)]
+    )
+
+    for low_contrast in ("[dim", "grey", "yellow1", "yellow3", "gold3", "dark_orange]"):
+        assert low_contrast not in markup
+
+
+def test_text_palette_has_wcag_contrast_against_both_papers() -> None:
+    def luminance(hex_colour: str) -> float:
+        channels = [int(hex_colour[index : index + 2], 16) / 255 for index in (1, 3, 5)]
+        linear = [
+            channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
+            for channel in channels
+        ]
+        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+    def contrast(first: str, second: str) -> float:
+        brightest, darkest = sorted((luminance(first), luminance(second)), reverse=True)
+        return (brightest + 0.05) / (darkest + 0.05)
+
+    foregrounds = {
+        presenter.TEXT_PRIMARY,
+        presenter.TEXT_SECONDARY,
+        presenter.TEXT_MUTED,
+        presenter.SECTION_TEXT,
+        presenter.DARK_GREEN,
+        presenter.DARK_RED,
+        presenter.DARK_AMBER,
+        *presenter.TYPE_TEXT_COLORS.values(),
+    }
+    for foreground in foregrounds:
+        assert contrast(foreground, "#e0d8c1") >= 4.5
+        assert contrast(foreground, "#f8f8f8") >= 4.5
+
+
 def test_status_filter_cycles_todos_capturados_vistos_pendientes():
     assert presenter.next_status_filter(None) == "captured"
     assert presenter.next_status_filter("captured") == "seen"

@@ -234,6 +234,27 @@ def test_flechas_del_detalle_recorren_evoluciones_con_visibilidad_de_pokedex() -
     asyncio.run(scenario())
 
 
+def test_familia_evolutiva_respeta_la_cadena_y_no_el_numero_de_pokedex() -> None:
+    async def scenario() -> None:
+        family = ("pichu", "pikachu", "raichu")
+        entries = [
+            _entry(25, "pikachu", "captured", evolution_family=family),
+            _entry(26, "raichu", "seen"),
+            _entry(172, "pichu", "captured"),
+        ]
+        app = PokedexApp(
+            catalog_loader=lambda: entries,
+            captures_loader=lambda: [],
+            sprite_fetcher=lambda species, form, shiny: SPRITE,
+            skip_boot=True,
+        )
+        async with app.run_test(size=(120, 40)):
+            ordered = app.evolution_family(entries[0])
+            assert [entry.slug for entry in ordered] == ["pichu", "pikachu", "raichu"]
+
+    asyncio.run(scenario())
+
+
 def test_arriba_y_abajo_del_detalle_recorren_la_lista_actual() -> None:
     async def scenario() -> None:
         app = _app()
