@@ -11,23 +11,12 @@
   <img alt="mypy strict" src="https://img.shields.io/badge/mypy-strict-2A6DB2">
 </p>
 
-Una Pokédex local que convierte abrir la terminal y programar en una pequeña
-aventura. Cada terminal puede traer un Pokémon de
+Pokédex en tu terminal. Cada terminal puede traer un Pokémon de
 [Krabby](https://github.com/yannjor/krabby): tú decides si verlo, capturarlo,
 entrenarlo y formar un equipo.
 
 El estado vive en SQLite, los datos de especies se enriquecen con
-[PokeAPI](https://pokeapi.co) y la experiencia visual se renderiza con Rich. El
-hook está diseñado para degradar con elegancia: un fallo externo nunca debe
-costarte el prompt.
-
-## Lo esencial
-
-- Encuentros, captura probabilística, cuatro Pokéballs y formas alternativas.
-- Equipo, experiencia por actividad Git y evoluciones por nivel.
-- Funcionamiento offline mediante caché local y fallbacks acotados.
-- Persistencia transaccional preparada para terminales concurrentes.
-- Animaciones y sprites de terminal sin convertir el juego en un servicio.
+[PokeAPI](https://pokeapi.co) y la experiencia visual se renderiza con Rich. 
 
 ## Inicio rápido
 
@@ -41,6 +30,10 @@ pokedex --help
 El instalador crea una copia estable en el directorio XDG, un shim en
 `~/bin/pokedex` y el completado de Zsh. La activación del encuentro al abrir una
 terminal está explicada en la [guía de instalación](docs/installation.md).
+
+## Inicio más rápido
+
+Apaga el cerebro y dirige tu agente de código hacia [INSTALL.md](INSTALL.md)
 
 ## Comandos habituales
 
@@ -56,12 +49,6 @@ terminal está explicada en la [guía de instalación](docs/installation.md).
 | `pokedex refresh` | Borrar y recargar desde PokeAPI los datos de las capturas |
 | `pokedex demo` | Probar animaciones sin guardar estado |
 
-Las evoluciones que en los juegos requieren amistad, objetos, intercambio u
-otras condiciones reciben un nivel equivalente. Se conserva cualquier nivel
-publicado por PokeAPI; para el resto se usa el movimiento requerido, una rama
-hermana o la estructura de la familia. Las ramas disponibles al mismo nivel se
-resuelven al azar, por lo que varias capturas de Eevee pueden evolucionar de
-forma distinta.
 
 ## Documentación
 
@@ -73,7 +60,3 @@ La [documentación del proyecto](docs/README.md) está organizada por propósito
   [estándares](docs/engineering-standards.md);
 - entender: [arquitectura](docs/architecture.md),
   [modelo de datos](docs/data-model.md) e [infraestructura](docs/infrastructure.md).
-
-El sprite de cabecera se genera a partir del arte terminal de
-[Krabby](https://github.com/yannjor/krabby) y se puede
-[cambiar por cualquier nombre o forma](docs/logo.md).
