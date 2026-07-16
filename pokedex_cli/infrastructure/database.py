@@ -284,6 +284,13 @@ def _migration_009_dex_caught(connection: sqlite3.Connection) -> None:
         )
         """
     )
+
+
+def _migration_010_encounter_levels(connection: sqlite3.Connection) -> None:
+    if "encounter_level" not in _columns(connection, "species_cache"):
+        connection.execute(
+            "ALTER TABLE species_cache ADD COLUMN encounter_level INTEGER NOT NULL DEFAULT 5"
+        )
     connection.execute(
         "INSERT OR IGNORE INTO dex_caught (species, form, first_caught_at) "
         "SELECT species, form, MIN(caught_at) FROM captures GROUP BY species, form"
@@ -312,6 +319,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     (7, _migration_007_individuality),
     (8, _migration_008_sightings),
     (9, _migration_009_dex_caught),
+    (10, _migration_010_encounter_levels),
 )
 
 

@@ -82,6 +82,7 @@ class CaptureCommand:
     is_legendary: bool
     is_mythical: bool
     growth_rate: str | None
+    encounter_level: int = STARTING_LEVEL
     gender_rate: int | None = None
     abilities: tuple[str, ...] = ()
 
@@ -135,12 +136,18 @@ class CaptureEncounter:
                     return CaptureResult(CaptureStatus.NO_STOCK)
                 inventory["balls"][command.ball_slug] = stock - 1
 
+            level = max(
+                STARTING_LEVEL,
+                int(command.encounter_level),
+                50 if command.is_legendary else STARTING_LEVEL,
+            )
             chance = catch_chance(
                 command.capture_rate,
                 is_legendary=command.is_legendary,
                 is_mythical=command.is_mythical,
                 shiny=bool(encounter["shiny"]),
                 ball_multiplier=command.ball_multiplier,
+                level=level,
             )
             caught = self._random.random() < chance
             self._inventory_repository.save_in_transaction(connection, inventory)
@@ -153,7 +160,6 @@ class CaptureEncounter:
                 nature = roll_nature(self._random)
                 gender = gender_from_roll(command.gender_rate, self._random.random())
                 ability = roll_ability(command.abilities, self._random)
-                level = 50 if command.is_legendary else STARTING_LEVEL
                 capture_id = self._capture_repository.insert(
                     connection,
                     species=str(encounter["species"]),

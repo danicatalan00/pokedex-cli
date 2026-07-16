@@ -21,6 +21,7 @@ def catch_chance(
     is_mythical: bool = False,
     shiny: bool = False,
     ball_multiplier: float = 1.0,
+    level: int = 5,
 ) -> float:
     """Return a validated capture probability in the closed interval [0, 1]."""
     del shiny  # Reserved for an explicit future rule; it has no effect today.
@@ -42,7 +43,8 @@ def catch_chance(
         base = 0.55 if (is_legendary or is_mythical) else 0.8
     else:
         base = capture_rate / 255
-    return max(0.0, min(1.0, base * multiplier))
+    level_factor = math.sqrt(5 / max(1, int(level)))
+    return max(0.0, min(1.0, base * multiplier * level_factor))
 
 
 def escape_after_attempts(

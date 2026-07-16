@@ -132,6 +132,13 @@ class PokeApiClient:
 
         pokemon_json = self._get_json(f"{self._base_url}/pokemon/{variety_name}")
         self._validate_pokemon(pokemon_json)
+        evolution_cache: dict[str, dict[str, Any] | None] = {}
+
+        def fetch_evolution(url: str) -> dict[str, Any] | None:
+            if url not in evolution_cache:
+                evolution_cache[url] = self._get_json(url)
+            return evolution_cache[url]
+
         return {
             "pokedex_id": species_json["id"],
             "capture_rate": species_json["capture_rate"],
@@ -140,8 +147,9 @@ class PokeApiClient:
             "gender_rate": species_json.get("gender_rate"),
             "generation": species_json.get("generation", {}).get("name"),
             "growth_rate": species_json.get("growth_rate", {}).get("name"),
+            "encounter_level": parsing._encounter_level(species_json, species, fetch_evolution),
             "level_evolutions": parsing._level_evolutions(
-                species_json, pokemon_json, species, form, self._get_json
+                species_json, pokemon_json, species, form, fetch_evolution
             ),
             "flavor_text": parsing._flavor_text(species_json),
             "form_data_exact": form_data_exact,

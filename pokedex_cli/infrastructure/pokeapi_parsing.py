@@ -217,6 +217,44 @@ def _level_evolutions(
     ]
 
 
+def _encounter_level(
+    species_json: JsonObject,
+    species: str,
+    fetch_json: JsonFetcher | None = None,
+) -> int:
+    """Return the usual level at which this species enters its evolution chain."""
+    chain_url = species_json.get("evolution_chain", {}).get("url")
+    fetch = fetch_json or _get_json
+    chain_json = fetch(chain_url) if chain_url else None
+    root = chain_json.get("chain", {}) if chain_json else {}
+
+    def path_to(node: JsonObject) -> list[JsonObject] | None:
+        if node.get("species", {}).get("name") == species:
+            return [node]
+        for child in node.get("evolves_to", []):
+            path = path_to(child)
+            if path is not None:
+                return [node, *path]
+        return None
+
+    path = path_to(root)
+    if not path or len(path) == 1:
+        return 5
+    current = path[-1]
+    explicit = [
+        int(detail.get("min_level") or 0)
+        for detail in current.get("evolution_details", [])
+        if int(detail.get("min_level") or 0) > 0
+    ]
+    if explicit:
+        return min(explicit)
+    depth = len(path) - 1
+    has_later_stage = bool(current.get("evolves_to"))
+    if depth == 1 and has_later_stage:
+        return 20
+    return 36 if depth >= 2 else 30
+
+
 def fetch_species_data(species: str, form: str) -> JsonObject | None:
     """Fetch enrichment data for a species (+optional alternate form) from
     PokeAPI. Never raises: returns None if there is no network or the

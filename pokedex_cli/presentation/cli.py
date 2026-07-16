@@ -171,6 +171,7 @@ def cmd_capturar(args: argparse.Namespace) -> int:
             is_legendary=bool(cache["is_legendary"]) if cache is not None else False,
             is_mythical=bool(cache["is_mythical"]) if cache is not None else False,
             growth_rate=_cache_value(cache, "growth_rate", "medium"),
+            encounter_level=int(_cache_value(cache, "encounter_level", 5)),
             gender_rate=_cache_gender_rate(cache),
             abilities=_cache_abilities(cache),
         )

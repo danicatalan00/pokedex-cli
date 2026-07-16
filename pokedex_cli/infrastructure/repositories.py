@@ -387,9 +387,9 @@ class SQLiteSpeciesCacheRepository:
                     (species, form, pokedex_id, capture_rate, types,
                      hp, atk, def, spa, spd, spe, is_legendary, is_mythical,
                      generation, flavor_text, form_data_exact, growth_rate,
-                     base_experience, level_evolutions, gender_rate, abilities,
+                     base_experience, encounter_level, level_evolutions, gender_rate, abilities,
                      fetched_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(species, form) DO UPDATE SET
                     pokedex_id=excluded.pokedex_id,
                     capture_rate=excluded.capture_rate,
@@ -407,6 +407,7 @@ class SQLiteSpeciesCacheRepository:
                     form_data_exact=excluded.form_data_exact,
                     growth_rate=excluded.growth_rate,
                     base_experience=excluded.base_experience,
+                    encounter_level=excluded.encounter_level,
                     level_evolutions=excluded.level_evolutions,
                     gender_rate=excluded.gender_rate,
                     abilities=excluded.abilities,
@@ -431,6 +432,7 @@ class SQLiteSpeciesCacheRepository:
                     int(bool(data.get("form_data_exact", True))),
                     data.get("growth_rate"),
                     data.get("base_experience"),
+                    data.get("encounter_level", 5),
                     json.dumps(data.get("level_evolutions", [])),
                     data.get("gender_rate"),
                     json.dumps(data.get("abilities", [])),

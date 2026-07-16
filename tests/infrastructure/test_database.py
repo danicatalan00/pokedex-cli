@@ -69,6 +69,7 @@ def test_every_recorded_historical_schema_upgrades_without_losing_captures(
             "gender",
             "ability",
         }
+        assert "encounter_level" in database._columns(upgraded, "species_cache")
     finally:
         upgraded.close()
 

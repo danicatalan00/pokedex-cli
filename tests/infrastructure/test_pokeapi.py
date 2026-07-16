@@ -182,6 +182,37 @@ def test_explicit_level_wins_over_an_item_alternative_for_same_route() -> None:
     assert result["level_evolutions"] == [{"species": "raichu", "form": "regular", "min_level": 20}]
 
 
+def test_evolved_species_uses_its_incoming_evolution_level() -> None:
+    species = species_payload()
+    species["varieties"] = [{"is_default": True, "pokemon": {"name": "charizard"}}]
+    species["evolution_chain"] = {"url": "https://example.test/chain/1"}
+    chain = {
+        "chain": {
+            "species": {"name": "charmander"},
+            "evolves_to": [
+                {
+                    "species": {"name": "charmeleon"},
+                    "evolution_details": [{"min_level": 16}],
+                    "evolves_to": [
+                        {
+                            "species": {"name": "charizard"},
+                            "evolution_details": [{"min_level": 36}],
+                            "evolves_to": [],
+                        }
+                    ],
+                }
+            ],
+        }
+    }
+    session = FakeSession(
+        [FakeResponse(200, species), FakeResponse(200, pokemon_payload()), FakeResponse(200, chain)]
+    )
+
+    result = PokeApiClient(session=session).fetch_species_data("charizard", "regular")
+
+    assert result["encounter_level"] == 36
+
+
 def evolution_species_payload(name: str, *, is_baby: bool = False) -> dict:
     payload = species_payload()
     payload["id"] = 1

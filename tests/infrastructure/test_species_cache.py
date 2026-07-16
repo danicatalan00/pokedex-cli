@@ -22,6 +22,7 @@ def payload(pokedex_id=25):
         "form_data_exact": True,
         "growth_rate": "medium",
         "base_experience": 112,
+        "encounter_level": 20,
         "level_evolutions": [{"species": "raichu", "form": "regular", "min_level": 20}],
         "gender_rate": 4,
         "abilities": ["static", "lightning-rod"],
@@ -37,6 +38,7 @@ def test_sqlite_species_cache_round_trips_and_updates_payload(tmp_path):
     assert cached["pokedex_id"] == 25
     assert json.loads(cached["types"]) == ["electric"]
     assert json.loads(cached["level_evolutions"])[0]["species"] == "raichu"
+    assert cached["encounter_level"] == 20
     assert cached["gender_rate"] == 4
     assert json.loads(cached["abilities"]) == ["static", "lightning-rod"]
 

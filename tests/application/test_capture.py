@@ -139,6 +139,24 @@ def test_legendary_capture_starts_at_level_50(tmp_path: Path) -> None:
     assert (row["level"], row["experience"]) == (50, 156250)
 
 
+def test_evolved_capture_uses_encounter_level_for_level_and_chance(tmp_path: Path) -> None:
+    use_case, inventory_repository, encounter_repository = build_use_case(tmp_path)
+    seed(inventory_repository, encounter_repository)
+
+    result = use_case.execute(replace(command(), encounter_level=36, ball_multiplier=1.0))
+
+    connection = database.connect(tmp_path / "pokedex.db")
+    try:
+        row = connection.execute(
+            "SELECT level, experience FROM captures WHERE id = ?", (result.capture_id,)
+        ).fetchone()
+    finally:
+        connection.close()
+    assert row["level"] == 36
+    assert row["experience"] == 36**3
+    assert result.chance == pytest.approx((190 / 255) * (5 / 36) ** 0.5)
+
+
 def test_success_with_unknown_gender_and_no_abilities_persists_nulls(tmp_path: Path) -> None:
     # command() defaults gender_rate=None and abilities=(): both traits that
     # need species data the capturer didn't have must be stored as NULL.
