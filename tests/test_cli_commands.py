@@ -283,3 +283,83 @@ def test_refresh_reports_successes_and_failures(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert "1 de 2" in output
     assert "slowking (galar)" in output
+
+
+def _demo_vision_cache(**overrides):
+    cache = {
+        "pokedex_id": 6,
+        "types": '["fire", "flying"]',
+        "hp": 78,
+        "atk": 84,
+        "def": 78,
+        "spa": 109,
+        "spd": 85,
+        "spe": 100,
+        "is_legendary": 0,
+        "is_mythical": 0,
+        "generation": "generation-i",
+        "flavor_text": "Escupe fuego.",
+        "form_data_exact": 1,
+        "gender_rate": 1,
+        "abilities": '["blaze"]',
+        "growth_rate": "medium-slow",
+        "capture_rate": 45,
+    }
+    cache.update(overrides)
+    return cache
+
+
+def test_demo_vision_renders_synthetic_individual_at_level(monkeypatch, capsys):
+    species_use_case = MagicMock()
+    species_use_case.execute.return_value = _demo_vision_cache()
+    monkeypatch.setattr(cli, "_species_data_use_case", lambda: species_use_case)
+    sprites = MagicMock()
+    sprites.capture_sprite.return_value = None
+    monkeypatch.setattr(cli, "_sprite_renderer", lambda: sprites)
+
+    namespace = argparse.Namespace(
+        nombre="charizard", nivel=80, form="regular", shiny=False, seed="1"
+    )
+    assert cli.cmd_demo_vision(namespace) == 0
+
+    output = capsys.readouterr().out
+    assert "Nv. 80" in output
+    assert "demo" in output
+    assert "nada se guarda" in output
+    assert "Naturaleza" in output
+    assert "Habilidad Blaze" in output
+    # stats actuales, no las base: a nivel 80 el HP supera con mucho la base 78
+    assert "base 78" in output
+    species_use_case.execute.assert_called_once_with("charizard", "regular")
+
+
+def test_demo_vision_reports_missing_species(monkeypatch, capsys):
+    species_use_case = MagicMock()
+    species_use_case.execute.return_value = None
+    monkeypatch.setattr(cli, "_species_data_use_case", lambda: species_use_case)
+
+    namespace = argparse.Namespace(
+        nombre="noexiste", nivel=80, form="regular", shiny=False, seed="1"
+    )
+    assert cli.cmd_demo_vision(namespace) == 1
+    assert "No se pudo obtener" in capsys.readouterr().out
+
+
+def test_demo_vision_clamps_level_and_is_deterministic(monkeypatch, capsys):
+    species_use_case = MagicMock()
+    species_use_case.execute.return_value = _demo_vision_cache()
+    monkeypatch.setattr(cli, "_species_data_use_case", lambda: species_use_case)
+    sprites = MagicMock()
+    sprites.capture_sprite.return_value = None
+    monkeypatch.setattr(cli, "_sprite_renderer", lambda: sprites)
+
+    namespace = argparse.Namespace(
+        nombre="charizard", nivel=999, form="regular", shiny=False, seed="1"
+    )
+    assert cli.cmd_demo_vision(namespace) == 0
+    first = capsys.readouterr().out
+    assert "Nv. 100" in first
+    assert "EXP MAX" in first
+
+    assert cli.cmd_demo_vision(namespace) == 0
+    assert capsys.readouterr().out == first

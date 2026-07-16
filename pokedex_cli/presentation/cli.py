@@ -617,6 +617,78 @@ def cmd_demo(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_demo_vision(args: argparse.Namespace) -> int:
+    """Ficha `vision` de un individuo SINTÉTICO al nivel pedido: para probar
+    el renderizado de stats por nivel sin capturar nada ni tocar la BD."""
+    import json as json_module
+
+    from pokedex_cli.domain import individuality
+    from pokedex_cli.domain.identity import normalize_form
+
+    species = normalize_species(args.nombre)
+    form = normalize_form(args.form)
+    cache = _species_data_use_case().execute(species, form)
+    if cache is None:
+        console.print(
+            f"No se pudo obtener info de '{args.nombre}' "
+            "(¿nombre incorrecto? ¿sin conexión? prueba `krabby list`)."
+        )
+        return 1
+
+    level = max(1, min(progression.MAX_LEVEL, int(args.nivel)))
+    seed = f"demo:{species}:{form}:nv{level}:{args.seed}"
+    ivs, nature = individuality.derive_ivs_nature(seed)
+    gender = individuality.derive_gender(seed, _cache_gender_rate(cache))
+    abilities = _cache_abilities(cache)
+    ability = individuality.derive_ability(seed, abilities)
+
+    def _decoded(key: str, fallback):
+        try:
+            value = json_module.loads(cache[key] or "null")
+        except (TypeError, ValueError, KeyError):
+            return fallback
+        return value if value is not None else fallback
+
+    bases = {key: cache[key] for key in individuality.STAT_KEYS}
+    stats = individuality.compute_stats(bases, ivs, level, nature)
+    growth = _cache_value(cache, "growth_rate", "medium")
+    floor = progression.experience_for_level(growth, level)
+    is_max = level >= progression.MAX_LEVEL
+    ceiling = floor if is_max else progression.experience_for_level(growth, level + 1)
+
+    row = {
+        "demo": True,
+        "species": species,
+        "form": form,
+        "shiny": bool(args.shiny),
+        "pokedex_id": cache["pokedex_id"],
+        "types": _decoded("types", []),
+        "is_legendary": bool(cache["is_legendary"]),
+        "is_mythical": bool(cache["is_mythical"]),
+        "generation": cache["generation"],
+        "flavor_text": cache["flavor_text"],
+        "form_data_exact": cache["form_data_exact"],
+        "gender_rate": _cache_gender_rate(cache),
+        "level": level,
+        "is_max_level": is_max,
+        "experience_into_level": 0,
+        "experience_for_next_level": ceiling - floor,
+        "ivs": ivs,
+        "nature": nature,
+        "gender": gender,
+        "ability": ability,
+        "stats": stats,
+        **{key: cache[key] for key in individuality.STAT_KEYS},
+    }
+    console.print(
+        f"[dim]· demo ·[/] individuo sintético de [bold]{_display_name(species, form)}[/] "
+        f"al nivel {level} [dim](semilla {args.seed}; usa --seed para otro individuo)[/]"
+    )
+    sprite = _sprite_renderer().capture_sprite(species, form, bool(args.shiny))
+    display.render_vision_card(console, row, sprite)
+    return 0
+
+
 def cmd_demo_evolucion(args: argparse.Namespace) -> int:
     """Prueba visual segura: no toca capturas, experiencia ni encuentros."""
     animation.play_evolution_animation(
@@ -879,6 +951,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="Pokeball cuya animación quieres probar (por defecto: poke)",
     )
     demo_parser.set_defaults(func=cmd_demo)
+
+    vision_demo = subparsers.add_parser(
+        "demo-vision",
+        help="ficha vision de un individuo sintético al nivel que pidas",
+        description="Renderiza la ficha `vision` de un individuo generado al vuelo "
+        "(IVs, naturaleza, sexo y habilidad deterministas según --seed) al nivel "
+        "indicado, para probar cómo escalan las barras de stats. No guarda nada.",
+    )
+    vision_demo.add_argument("nombre", help="nombre del Pokémon (como en `krabby list`)")
+    vision_demo.add_argument(
+        "-n",
+        "--nivel",
+        type=int,
+        default=50,
+        metavar="NIVEL",
+        help="nivel del individuo sintético, 1-100 (por defecto: 50)",
+    )
+    vision_demo.add_argument(
+        "-f", "--form", default="regular", metavar="FORMA", help="forma alternativa"
+    )
+    vision_demo.add_argument("-s", "--shiny", action="store_true", help="variante shiny")
+    vision_demo.add_argument(
+        "--seed",
+        default="1",
+        metavar="SEMILLA",
+        help="cambia la semilla para obtener otro individuo (IVs/naturaleza/sexo)",
+    )
+    vision_demo.set_defaults(func=cmd_demo_vision)
 
     evolution_demo = subparsers.add_parser(
         "demo-evolucion",

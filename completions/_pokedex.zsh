@@ -37,6 +37,7 @@ _pokedex() {
     'legendarios:tu salón de la fama de legendarios'
     'refresh:borra y recarga los datos PokeAPI de tus capturas'
     'demo:prueba la animación de captura sin guardar nada'
+    'demo-vision:ficha vision de un individuo sintético al nivel que pidas'
     'demo-evolucion:prueba la animación de evolución sin guardar nada'
     'completion:imprime el script de autocompletado'
     'hook:(interno) pinta un Pokémon y recuerda cuál fue'
@@ -79,6 +80,14 @@ _pokedex() {
             '(-g --generations)'{-g,--generations}'[generaciones para el azar]:gens:' \
             '(-r --result)'{-r,--result}'[fuerza el resultado]:resultado:(random catch escape)' \
             '(-b --bola)'{-b,--bola}'[animación de Pokeball]:bola:(poke super ultra master)' \
+            '1:Pokémon:_pokedex_pokemon_names'
+          ;;
+        demo-vision)
+          _arguments \
+            '(-n --nivel)'{-n,--nivel}'[nivel del individuo sintético 1-100]:nivel:' \
+            '(-s --shiny)'{-s,--shiny}'[variante shiny]' \
+            '(-f --form)'{-f,--form}'[forma alternativa]:forma:' \
+            '--seed[semilla del individuo]:semilla:' \
             '1:Pokémon:_pokedex_pokemon_names'
           ;;
         demo-evolucion)

@@ -346,6 +346,14 @@ def render_vision_card(console: Console, row: dict, sprite: str | None) -> None:
         )
     else:
         foot.append("  ·  EXP MAX   ·   ", style="gold3")
+    if row.get("demo"):
+        # Ficha sintética (`pokedex demo-vision`): no hay captura que citar.
+        foot.append("ficha de demostración · nada se guarda", style="grey54")
+        if gen:
+            foot.append(f"   ·   Gen {gen}", style="grey54")
+        blocks.append(foot)
+        _print_vision_panel(console, blocks, sprite, accent)
+        return
     foot.append("Capturado: ", style="grey54")
     foot.append(row["caught_at"][:10], style="grey85")
     foot.append(f"   ·   captura #{row['id']}", style="grey54")
@@ -359,10 +367,12 @@ def render_vision_card(console: Console, row: dict, sprite: str | None) -> None:
         foot.append("   ·   ", style="grey54")
         foot.append("⭐ en tu equipo", style="gold3")
     blocks.append(foot)
+    _print_vision_panel(console, blocks, sprite, accent)
 
+
+def _print_vision_panel(console: Console, blocks: list, sprite: str | None, accent: str) -> None:
+    """Composición final sprite | ficha dentro del panel POKÉDEX."""
     info = Group(*_interleave(blocks))
-
-    # --- Composición sprite | ficha ----------------------------------------
     if sprite:
         layout = Table.grid(padding=(0, 4))
         layout.add_column(vertical="middle")
