@@ -29,6 +29,15 @@ STATUS_FILTER_LABELS: dict[str | None, str] = {
 }
 MAX_GENERATION = 9
 
+STAT_SHORT_LABELS = {
+    "hp": "PS",
+    "atk": "Ata",
+    "def": "Def",
+    "spa": "AtEs",
+    "spd": "DfEs",
+    "spe": "Vel",
+}
+
 
 def _fold(text: str) -> str:
     """Case/accent-insensitive fold, e.g. 'Nidoran♀' ~ 'nidoran'."""
@@ -101,19 +110,51 @@ def progress_summary(entries: Sequence[CatalogEntry]) -> str:
 
 
 def detail_lines(entry: CatalogEntry) -> list[str]:
-    """Lines of markup text for the ficha (bottom-right panel)."""
+    """Lines of markup text for the ficha (bottom-right panel).
+
+    Semántica de Pokédex del juego: una especie solo vista enseña nombre,
+    tipos y poco más; la entrada completa (stats base, descripción) se
+    desbloquea al capturarla.
+    """
     if entry.status == UNSEEN:
         return [
-            f"[dim]{HIDDEN_NAME}[/]",
-            f"Gen {entry.gen} · sin datos. Sigue abriendo terminales…",
+            f"[dim bold]{HIDDEN_NAME}[/]",
+            "",
+            f"[dim]Gen {entry.gen} · especie sin identificar.[/]",
+            "[dim]Sigue abriendo terminales…[/]",
         ]
-    lines = [f"[bold]{visible_name(entry)}[/]"]
-    lines.append(f"Gen {entry.gen} · avistamientos: {entry.times_seen}")
+
+    from pokedex_cli.presentation import display
+
+    lines = [f"[bold]#{entry.idx:03d} {visible_name(entry)}[/]"]
     if entry.types:
-        lines.append(" · ".join(entry.types))
+        lines.append(display.type_badges(list(entry.types)))
+    lines.append(f"[grey62]Gen {entry.gen} · avistamientos: {entry.times_seen}[/]")
+
+    if entry.status != CAPTURED:
+        lines.append("")
+        lines.append("[dim italic]Datos incompletos: captúralo para registrar su entrada.[/]")
+        return lines
+
+    if entry.base_stats:
+        lines.append("")
+        for key, value in entry.base_stats:
+            label = STAT_SHORT_LABELS.get(key, key.upper())
+            bar = display.stat_bar_base(value, width=12)
+            colour = display.stat_color_base(value)
+            lines.append(f"[grey70]{label:>5}[/] {bar} [{colour}]{value:>3}[/]")
+        total = sum(value for _, value in entry.base_stats)
+        lines.append(f"[grey70]Total[/] [bold]{total}[/] [dim](stats base)[/]")
     if entry.description:
-        lines.append(f"[italic]{entry.description}[/]")
-    if entry.status == CAPTURED:
-        shiny_note = " · ✨ shiny" if entry.any_shiny else ""
-        lines.append(f"Capturas: {entry.captures_count} · nivel máx. {entry.max_level}{shiny_note}")
+        lines.append("")
+        lines.append(f"[italic grey85]{entry.description}[/]")
+    lines.append("")
+    shiny_note = " · ✨ shiny" if entry.any_shiny else ""
+    if entry.captures_count:
+        lines.append(
+            f"[gold3]Capturas: {entry.captures_count} · nivel máx. {entry.max_level}{shiny_note}[/]"
+        )
+        lines.append("[dim]Enter: ficha del individuo[/]")
+    else:
+        lines.append("[gold3]Registrado en tu Pokédex[/] [dim](la captura evolucionó)[/]")
     return lines

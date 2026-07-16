@@ -143,3 +143,69 @@ def to_braille_silhouette(grid: PixelGrid, scale: int = 2) -> list[str]:
             row_chars.append(chr(0x2800 + code) if code else " ")
         rows.append("".join(row_chars).rstrip())
     return rows
+
+
+def downscale(grid: PixelGrid, factor: int) -> PixelGrid:
+    """Reduce la rejilla por un factor entero: cada bloque factor×factor se
+    colapsa a su primer píxel no transparente (conserva mejor la silueta que
+    el vecino puro, que agujerea los bordes finos)."""
+    if factor <= 1 or not grid:
+        return grid
+    height, width = len(grid), len(grid[0])
+    result: PixelGrid = []
+    for block_y in range(0, height, factor):
+        row: list[Pixel] = []
+        for block_x in range(0, width, factor):
+            chosen: Pixel = None
+            for y in range(block_y, min(block_y + factor, height)):
+                for x in range(block_x, min(block_x + factor, width)):
+                    if grid[y][x] is not None:
+                        chosen = grid[y][x]
+                        break
+                if chosen is not None:
+                    break
+            row.append(chosen)
+        result.append(row)
+    return result
+
+
+def to_half_blocks(grid: PixelGrid) -> list[str]:
+    """Vuelve a texto ANSI truecolor con medios bloques, el mismo formato que
+    emite krabby: cada carácter empaqueta dos píxeles apilados."""
+    lines: list[str] = []
+    for y in range(0, len(grid), 2):
+        top_row = grid[y]
+        bottom_row = grid[y + 1] if y + 1 < len(grid) else [None] * len(top_row)
+        cells: list[str] = []
+        for top, bottom in zip(top_row, bottom_row):
+            if top is None and bottom is None:
+                cells.append(" ")
+            elif top is not None and bottom is None:
+                cells.append(f"\x1b[38;2;{top[0]};{top[1]};{top[2]}m▀\x1b[0m")
+            elif bottom is not None and top is None:
+                cells.append(f"\x1b[38;2;{bottom[0]};{bottom[1]};{bottom[2]}m▄\x1b[0m")
+            else:
+                assert top is not None and bottom is not None
+                cells.append(
+                    f"\x1b[38;2;{top[0]};{top[1]};{top[2]}m"
+                    f"\x1b[48;2;{bottom[0]};{bottom[1]};{bottom[2]}m▀\x1b[0m"
+                )
+        lines.append("".join(cells).rstrip())
+    return lines
+
+
+def fit_sprite(sprite: str, max_rows: int, max_columns: int) -> str:
+    """Devuelve el sprite tal cual si cabe en max_rows×max_columns celdas de
+    texto; si no, lo reescala por el menor factor entero que lo haga caber."""
+    grid = parse_ansi_sprite(sprite)
+    if not grid:
+        return sprite
+    rows = (len(grid) + 1) // 2
+    columns = len(grid[0])
+    if rows <= max_rows and columns <= max_columns:
+        return sprite
+    factor = max(
+        -(-rows // max_rows),  # techo sin math.ceil
+        -(-columns // max_columns),
+    )
+    return "\n".join(to_half_blocks(downscale(grid, factor)))

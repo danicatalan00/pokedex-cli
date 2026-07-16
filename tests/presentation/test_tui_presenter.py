@@ -1,3 +1,5 @@
+import dataclasses
+
 from pokedex_cli.application.pokedex_catalog import CatalogEntry
 from pokedex_cli.presentation.tui import presenter
 
@@ -82,10 +84,10 @@ def test_unseen_species_names_are_hidden_everywhere():
     assert presenter.visible_name(mewtwo) == "??????"
     assert "??????" in presenter.list_row_markup(mewtwo)
     assert "Mewtwo" not in presenter.list_row_markup(mewtwo)
-    assert presenter.detail_lines(mewtwo) == [
-        "[dim]??????[/]",
-        "Gen 1 · sin datos. Sigue abriendo terminales…",
-    ]
+    lines = presenter.detail_lines(mewtwo)
+    assert "Mewtwo" not in "".join(lines)
+    assert any("??????" in line for line in lines)
+    assert any("Gen 1" in line for line in lines)
 
 
 def test_seen_and_captured_species_names_are_visible():
@@ -117,5 +119,61 @@ def test_progress_summary_counts_captured_and_seen_out_of_the_total():
 def test_detail_lines_for_a_captured_entry_include_capture_stats():
     bulbasaur = ENTRIES[0]
     lines = presenter.detail_lines(bulbasaur)
-    assert lines[0] == "[bold]Bulbasaur[/]"
+    assert lines[0] == "[bold]#001 Bulbasaur[/]"
     assert any("Capturas: 1" in line and "nivel máx. 10" in line for line in lines)
+
+
+def test_detail_lines_captured_show_base_stats_and_description():
+    entry_full = entry(
+        7,
+        "squirtle",
+        "Squirtle",
+        status="captured",
+        captures_count=2,
+        max_level=15,
+        types=("water",),
+        description="Se esconde en su caparazón.",
+    )
+    entry_full = dataclasses.replace(
+        entry_full,
+        base_stats=tuple(zip(("hp", "atk", "def", "spa", "spd", "spe"), (44, 48, 65, 50, 64, 43))),
+    )
+    lines = presenter.detail_lines(entry_full)
+    joined = "\n".join(lines)
+    assert "PS" in joined and " 44" in joined
+    assert "Total[/] [bold]314[/]" in joined
+    assert "Se esconde en su caparazón." in joined
+    assert "Enter: ficha del individuo" in joined
+
+
+def test_detail_lines_seen_hide_description_and_stats():
+    seen_entry = entry(
+        25,
+        "pikachu",
+        "Pikachu",
+        status="seen",
+        times_seen=3,
+        types=("electric",),
+        description="No debería verse aún.",
+    )
+    lines = presenter.detail_lines(seen_entry)
+    joined = "\n".join(lines)
+    assert "Pikachu" in joined and "electric" in joined
+    assert "No debería verse aún." not in joined
+    assert "captúralo" in joined.lower()
+
+
+def test_detail_lines_dex_registered_without_living_captures():
+    ghost = entry(
+        172,
+        "pichu",
+        "Pichu",
+        status="captured",
+        captures_count=0,
+        max_level=None,
+        times_seen=1,
+    )
+    lines = presenter.detail_lines(ghost)
+    joined = "\n".join(lines)
+    assert "Registrado en tu Pokédex" in joined
+    assert "Enter" not in joined

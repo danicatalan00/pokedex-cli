@@ -239,6 +239,8 @@ def _nature_ability_line(row: dict) -> Text:
 nature_ability_markup = _nature_ability_markup
 stat_bar_current = _stat_bar_current
 stat_color_current = _stat_color_current
+stat_bar_base = _stat_bar
+stat_color_base = _stat_color
 gender_suffix = _gender_suffix
 
 

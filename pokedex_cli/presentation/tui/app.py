@@ -27,15 +27,41 @@ from textual.timer import Timer
 from textual.widgets import Input, OptionList, Static
 from textual.widgets.option_list import Option
 
-from pokedex_cli.application.pokedex_catalog import CAPTURED, SEEN, CatalogEntry
+from pokedex_cli.application.pokedex_catalog import CAPTURED, UNSEEN, CatalogEntry
 from pokedex_cli.presentation import display
 from pokedex_cli.presentation.tui import graphics, presenter
 from pokedex_cli.presentation.tui.assets import POKEBALL_BRAILLE
 
 SCREEN_WIDTH = 44
 SCREEN_HEIGHT = 20
+SCREEN_INNER_ROWS = SCREEN_HEIGHT - 4  # borde + margen + línea de escaneo
+SCREEN_INNER_COLS = 50
 LCD_INK = "#0f380f"
 REVEAL_INTERVAL = 0.02
+
+# Colores de tipo (hex CSS para bordes de textual; display.TYPE_COLORS usa la
+# paleta xterm de rich, que textual no entiende).
+TYPE_HEX = {
+    "normal": "#a8a878",
+    "fire": "#f08030",
+    "water": "#6890f0",
+    "electric": "#f8d030",
+    "grass": "#78c850",
+    "ice": "#98d8d8",
+    "fighting": "#c03028",
+    "poison": "#a040a0",
+    "ground": "#e0c068",
+    "flying": "#a890f0",
+    "psychic": "#f85888",
+    "bug": "#a8b820",
+    "rock": "#b8a038",
+    "ghost": "#705898",
+    "dragon": "#7038f8",
+    "dark": "#705848",
+    "steel": "#b8b8d0",
+    "fairy": "#ee99ac",
+}
+DEFAULT_ACCENT = "#3ec5a7"
 
 SpriteFetcher = Callable[[str, str, bool], str | None]
 CatalogLoader = Callable[[], list[CatalogEntry]]
@@ -167,13 +193,6 @@ class DetailScreen(Screen[None]):
         Binding("right", "next_capture", "captura ▶"),
     ]
 
-    DEFAULT_CSS = """
-    DetailScreen { background: #1b1b1b; }
-    DetailScreen #detalle-cuerpo { padding: 1 2; }
-    DetailScreen #detalle-sprite { width: 46%; content-align: center middle; }
-    DetailScreen #detalle-ficha { width: 54%; padding: 0 2; }
-    """
-
     def __init__(
         self, app_ref: PokedexApp, entry: CatalogEntry, rows: list[dict[str, Any]]
     ) -> None:
@@ -193,6 +212,13 @@ class DetailScreen(Screen[None]):
         )
 
     def on_mount(self) -> None:
+        # Panel al estilo de la vision card: marco con el color del tipo
+        # primario y el nombre como título, sobre fondo neutro oscuro.
+        cuerpo = self.query_one("#detalle-cuerpo")
+        primary = self._entry.types[0] if self._entry.types else None
+        accent = TYPE_HEX.get(primary or "", DEFAULT_ACCENT)
+        cuerpo.styles.border = ("double", accent)
+        cuerpo.border_title = f"◓ {self._entry.name.upper()}"
         self._show_current()
 
     def action_previous_capture(self) -> None:
@@ -217,7 +243,8 @@ class DetailScreen(Screen[None]):
         )
         sprite_widget = self.query_one("#detalle-sprite", Static)
         if sprite:
-            sprite_widget.update(Text.from_ansi(sprite))
+            fitted = graphics.fit_sprite(sprite, 30, 56)
+            sprite_widget.update(Text.from_ansi(fitted))
         else:
             sprite_widget.update(Text("(sin sprite)", style="dim"))
         self.query_one("#detalle-ficha", Static).update(self._ficha(row))
@@ -273,50 +300,55 @@ class PokedexApp(App[None]):
 
     CSS = f"""
     Screen {{
-        background: #dc0a2d;
+        background: #15151a;
     }}
     #carcasa {{
-        border-top: thick #ff5d67;
-        border-left: thick #ff5d67;
-        border-bottom: thick #8b0000;
-        border-right: thick #8b0000;
-        background: #dc0a2d;
+        border-top: thick #c22439;
+        border-left: thick #c22439;
+        border-bottom: thick #6e0d1c;
+        border-right: thick #6e0d1c;
+        background: #15151a;
     }}
     #cabecera {{
         height: 3;
         padding: 0 2;
         content-align: left middle;
-        background: #dc0a2d;
+        background: #b71c30;
         color: #ffffff;
+        border-bottom: thick #6e0d1c;
     }}
-    #cuerpo {{ background: #dc0a2d; padding: 0 1; }}
+    #cuerpo {{ background: #15151a; padding: 0 1; }}
     #columna-lista {{
         width: 42%;
-        background: #2b0000;
-        border: round #8b0000;
+        background: #0e1116;
+        border: double #35606b;
+        border-title-color: #7fd4c1;
         margin: 0 1 0 0;
     }}
     #busqueda {{
-        background: #1b0000;
-        color: #f8d030;
-        border: tall #8b0000;
+        background: #0a0d11;
+        color: #ffcb05;
+        border: tall #35606b;
     }}
     #lista {{
-        background: #2b0000;
-        color: #dedede;
-        scrollbar-color: #8b0000;
+        background: #0e1116;
+        color: #d5d9de;
+        scrollbar-color: #35606b;
+        scrollbar-background: #0e1116;
     }}
     #lista > .option-list--option-highlighted {{
-        background: #f8d030;
-        color: #1b0000;
+        background: #ffcb05;
+        color: #101014;
         text-style: bold;
     }}
     #columna-pantallas {{ width: 58%; }}
     #marco-pantallita {{
-        border: tall #dedede;
+        border: double #9aa0a8;
+        border-title-color: #d5d9de;
         background: #9bbc0f;
         height: {SCREEN_HEIGHT};
         margin: 0 0 1 0;
+        padding: 0 1;
     }}
     #pantallita {{
         background: #9bbc0f;
@@ -325,12 +357,24 @@ class PokedexApp(App[None]):
         height: 100%;
     }}
     #ficha {{
-        border: round #8b0000;
-        background: #1b1b1b;
-        color: #dedede;
-        padding: 0 1;
+        border: double #35606b;
+        border-title-color: #7fd4c1;
+        background: #101318;
+        color: #d5d9de;
+        padding: 0 2;
     }}
-    Footer {{ background: #8b0000; color: #ffffff; }}
+    Footer {{ background: #6e0d1c; color: #ffffff; }}
+    DetailScreen {{ background: #101014; }}
+    DetailScreen #detalle-cuerpo {{
+        border: double {DEFAULT_ACCENT};
+        border-title-color: #ffffff;
+        background: #14141a;
+        margin: 1 2;
+        padding: 1 2;
+    }}
+    DetailScreen #detalle-sprite {{ width: 46%; content-align: center middle; }}
+    DetailScreen #detalle-ficha {{ width: 54%; padding: 0 2; }}
+    DetailScreen #detalle-pie {{ height: 1; background: #101014; color: #6f7580; }}
     """
 
     def __init__(
@@ -371,6 +415,9 @@ class PokedexApp(App[None]):
             yield Footer()
 
     def on_mount(self) -> None:
+        self.query_one("#columna-lista").border_title = "LISTA NACIONAL"
+        self.query_one("#marco-pantallita").border_title = "◓ PANTALLA"
+        self.query_one("#ficha").border_title = "DATOS"
         self._entries = self._catalog_loader()
         self._apply_filters(preserve_selection=False)
         self.query_one("#lista", OptionList).focus()
@@ -443,16 +490,11 @@ class PokedexApp(App[None]):
             ficha.update(Text.from_markup("[dim]Sin resultados.[/]"))
             return
         ficha.update(Text.from_markup("\n".join(presenter.detail_lines(entry))))
-        if entry.status == CAPTURED or entry.status == SEEN:
-            noise = _ScreenContent(static_noise(entry.idx, height=4), ansi=False, style=LCD_INK)
-            screen_widget.show(noise, instant=True)
-            self._load_sprite(entry)
-        else:
-            content = static_noise(entry.idx)
-            content.insert(len(content) // 2, "")
-            content.insert(len(content) // 2, "?")
-            content.insert(len(content) // 2, "")
-            screen_widget.show(_ScreenContent(content, ansi=False, style=LCD_INK))
+        # Estática breve mientras krabby responde; el render final depende del
+        # estado: no vista → silueta braille, vista/capturada → sprite a color.
+        noise = _ScreenContent(static_noise(entry.idx, height=4), ansi=False, style=LCD_INK)
+        screen_widget.show(noise, instant=True)
+        self._load_sprite(entry)
 
     @work(thread=True, exclusive=True)
     def _load_sprite(self, entry: CatalogEntry) -> None:
@@ -472,11 +514,16 @@ class PokedexApp(App[None]):
                 instant=True,
             )
             return
-        if entry.status == CAPTURED:
-            screen_widget.show(_ScreenContent(sprite.split("\n"), ansi=True))
-        else:
-            silhouette = graphics.to_braille_silhouette(graphics.parse_ansi_sprite(sprite))
+        if entry.status == UNSEEN:
+            grid = graphics.parse_ansi_sprite(sprite)
+            silhouette = graphics.to_braille_silhouette(grid)
+            if len(silhouette) > SCREEN_INNER_ROWS:
+                silhouette = graphics.to_braille_silhouette(grid, scale=1)
+            silhouette = [*silhouette, "", "?"]
             screen_widget.show(_ScreenContent(silhouette, ansi=False, style=LCD_INK))
+        else:
+            fitted = graphics.fit_sprite(sprite, SCREEN_INNER_ROWS, SCREEN_INNER_COLS)
+            screen_widget.show(_ScreenContent(fitted.split("\n"), ansi=True))
 
     # --- eventos ------------------------------------------------------------
 
