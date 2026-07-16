@@ -346,6 +346,10 @@ class SQLiteCaptureRepository:
         )
         if cursor.lastrowid is None:
             raise RuntimeError("capture insert did not return an id")
+        connection.execute(
+            "INSERT OR IGNORE INTO dex_caught (species, form, first_caught_at) VALUES (?, ?, ?)",
+            (species, form, caught_at),
+        )
         return int(cursor.lastrowid)
 
 
@@ -529,13 +533,24 @@ class SQLiteCollectionRepository:
         finally:
             connection.close()
 
+    def dex_caught_species(self) -> set[str]:
+        """Especies registradas como capturadas en la Pokédex, aunque la
+        captura haya evolucionado después (tabla ``dex_caught``)."""
+        connection = database.connect(self.database_path)
+        try:
+            rows = connection.execute("SELECT DISTINCT species FROM dex_caught").fetchall()
+            return {str(row["species"]) for row in rows}
+        finally:
+            connection.close()
+
     def species_cache_by_species(self) -> dict[str, dict[str, Any]]:
         """One row per species (ignoring form, as the catalog only tracks
         species-level state), preferring the 'regular' form's cache."""
         connection = database.connect(self.database_path)
         try:
             rows = connection.execute(
-                "SELECT species, form, types, is_legendary, is_mythical, flavor_text "
+                "SELECT species, form, types, is_legendary, is_mythical, flavor_text, "
+                "hp, atk, def, spa, spd, spe "
                 "FROM species_cache ORDER BY species, (form != 'regular'), form"
             ).fetchall()
             result: dict[str, dict[str, Any]] = {}
@@ -548,6 +563,12 @@ class SQLiteCollectionRepository:
                     "is_legendary": bool(row["is_legendary"]),
                     "is_mythical": bool(row["is_mythical"]),
                     "flavor_text": row["flavor_text"],
+                    "hp": row["hp"],
+                    "atk": row["atk"],
+                    "def": row["def"],
+                    "spa": row["spa"],
+                    "spd": row["spd"],
+                    "spe": row["spe"],
                 }
             return result
         finally:
@@ -721,6 +742,15 @@ class SQLiteEvolutionRepository:
                 evolution.target_form,
                 evolution.capture_id,
             ),
+        )
+        # Como en el juego: evolucionar registra la especie evolucionada como
+        # capturada en la Pokédex. CURRENT_TIMESTAMP es suficiente aquí: la
+        # fecha del registro solo es informativa y no hay reloj inyectado en
+        # esta operación de transacción ajena.
+        connection.execute(
+            "INSERT OR IGNORE INTO dex_caught (species, form, first_caught_at) "
+            "VALUES (?, ?, CURRENT_TIMESTAMP)",
+            (evolution.target_species, evolution.target_form),
         )
 
     def options(

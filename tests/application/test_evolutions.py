@@ -123,3 +123,21 @@ def test_completed_evolution_clears_the_ability_but_leaves_gender_untouched(
         assert row["ability"] is None
     finally:
         connection.close()
+
+
+def test_completed_evolution_registers_the_evolved_species_in_the_dex(
+    tmp_path: Path,
+) -> None:
+    use_case, path = build_use_case(tmp_path)
+    capture_id = seed_pending(path, "pichu", "pikachu")
+
+    use_case.execute([capture_id])
+
+    connection = database.connect(path)
+    try:
+        caught = {row["species"] for row in connection.execute("SELECT species FROM dex_caught")}
+        # pichu quedó registrado al capturarlo (backfill de la migración) y
+        # pikachu se registra al completar la evolución, como en el juego.
+        assert "pikachu" in caught
+    finally:
+        connection.close()

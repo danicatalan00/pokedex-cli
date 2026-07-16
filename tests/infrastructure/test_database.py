@@ -17,7 +17,7 @@ def test_new_database_enables_integrity_and_concurrency_pragmas(tmp_path: Path) 
         versions = connection.execute(
             "SELECT version FROM schema_migrations ORDER BY version"
         ).fetchall()
-        assert [row[0] for row in versions] == [1, 2, 3, 4, 5, 6, 7, 8]
+        assert [row[0] for row in versions] == [version for version, _ in database.MIGRATIONS]
     finally:
         connection.close()
 
@@ -32,20 +32,13 @@ def test_migrations_are_idempotent(tmp_path: Path) -> None:
             "SELECT version, COUNT(*) FROM schema_migrations GROUP BY version"
         ).fetchall()
         assert [tuple(row) for row in versions] == [
-            (1, 1),
-            (2, 1),
-            (3, 1),
-            (4, 1),
-            (5, 1),
-            (6, 1),
-            (7, 1),
-            (8, 1),
+            (version, 1) for version, _ in database.MIGRATIONS
         ]
     finally:
         second.close()
 
 
-@pytest.mark.parametrize("historical_version", range(1, 9))
+@pytest.mark.parametrize("historical_version", range(1, len(database.MIGRATIONS) + 1))
 def test_every_recorded_historical_schema_upgrades_without_losing_captures(
     tmp_path: Path, historical_version: int
 ) -> None:
@@ -65,7 +58,7 @@ def test_every_recorded_historical_schema_upgrades_without_losing_captures(
         assert [
             row[0]
             for row in upgraded.execute("SELECT version FROM schema_migrations ORDER BY version")
-        ] == [1, 2, 3, 4, 5, 6, 7, 8]
+        ] == [version for version, _ in database.MIGRATIONS]
         assert database._columns(upgraded, "captures") >= {
             "ball_slug",
             "level",
@@ -277,3 +270,46 @@ def test_migration_008_is_idempotent_when_rerun_directly(tmp_path: Path) -> None
     assert connection.execute("SELECT COUNT(*) FROM sightings").fetchone()[0] == 1
     assert connection.execute("SELECT times_seen FROM sightings").fetchone()[0] == 1
     connection.close()
+
+
+def test_migration_009_registers_dex_caught_including_evolved_captures(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "dex.db"
+    old = sqlite3.connect(path)
+    database.migrate(old, database.MIGRATIONS[:8])
+    # Una captura viva normal...
+    old.execute(
+        "INSERT INTO captures (species, form, shiny, caught_at) "
+        "VALUES ('pikachu', 'regular', 0, '2026-07-03T12:52:49.357228+00:00')"
+    )
+    # ...cuyo avistamiento retro de la 008 delata que nació siendo pichu: el
+    # first_seen_at coincide exactamente con un caught_at (backfill desde
+    # captures) pero la especie ya no está en captures (evolucionó).
+    old.execute(
+        "INSERT INTO sightings (species, form, first_seen_at, last_seen_at) "
+        "VALUES ('pichu', 'regular', "
+        "'2026-07-03T12:52:49.357228+00:00', '2026-07-03T12:52:49.357228+00:00')"
+    )
+    # Un avistamiento normal de encuentro (timestamp propio): NO capturado.
+    old.execute(
+        "INSERT INTO sightings (species, form, first_seen_at, last_seen_at) "
+        "VALUES ('eevee', 'regular', '2026-07-14T09:00:00+00:00', '2026-07-14T09:00:00+00:00')"
+    )
+    old.commit()
+    old.close()
+
+    upgraded = database.connect(path)
+    try:
+        caught = {row["species"] for row in upgraded.execute("SELECT species FROM dex_caught")}
+        assert caught == {"pikachu", "pichu"}
+    finally:
+        upgraded.close()
+
+    # Idempotente al reejecutarla directamente.
+    connection = database.connect(path)
+    try:
+        database._migration_009_dex_caught(connection)
+        assert connection.execute("SELECT COUNT(*) FROM dex_caught").fetchone()[0] == 2
+    finally:
+        connection.close()

@@ -27,6 +27,9 @@ class CatalogEntry:
     any_shiny: bool
     times_seen: int
     description: str | None
+    # Stats base de la especie en orden (hp, atk, def, spa, spd, spe); None
+    # si no hay caché de especie. Solo la ficha de especies capturadas las usa.
+    base_stats: tuple[tuple[str, int], ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -58,6 +61,13 @@ class SpeciesCacheSource(Protocol):
     def species_cache_by_species(self) -> dict[str, dict[str, Any]]: ...
 
 
+class DexRegistrySource(Protocol):
+    def dex_caught_species(self) -> set[str]: ...
+
+
+_BASE_STAT_KEYS = ("hp", "atk", "def", "spa", "spd", "spe")
+
+
 def _fallback_name(slug: str) -> str:
     return slug.replace("-", " ").title()
 
@@ -78,24 +88,29 @@ class PokedexCatalog:
         sightings: SightingsSource,
         captures: CapturesSource,
         species_cache: SpeciesCacheSource,
+        dex_registry: DexRegistrySource | None = None,
     ) -> None:
         self._krabby = krabby
         self._sightings = sightings
         self._captures = captures
         self._species_cache = species_cache
+        self._dex_registry = dex_registry
 
     def execute(self) -> list[CatalogEntry]:
         sightings = self._sightings.aggregated()
         captures = self._captures.captures_aggregated()
         cache = self._species_cache.species_cache_by_species()
+        dex = self._dex_registry.dex_caught_species() if self._dex_registry else set()
         database = self._krabby.load_database()
 
         if database:
-            entries = [self._entry_from_krabby(raw, sightings, captures, cache) for raw in database]
-        else:
-            known = sorted(set(sightings) | set(captures))
             entries = [
-                self._entry_without_krabby(index, slug, sightings, captures, cache)
+                self._entry_from_krabby(raw, sightings, captures, cache, dex) for raw in database
+            ]
+        else:
+            known = sorted(set(sightings) | set(captures) | dex)
+            entries = [
+                self._entry_without_krabby(index, slug, sightings, captures, cache, dex)
                 for index, slug in enumerate(known, start=1)
             ]
         entries.sort(key=lambda entry: entry.idx)
@@ -106,8 +121,11 @@ class PokedexCatalog:
         slug: str,
         sightings: dict[str, SightingAggregate],
         captures: dict[str, CaptureAggregate],
+        dex: set[str],
     ) -> str:
-        if slug in captures:
+        # Como en el juego: una vez registrada como capturada, siempre
+        # capturada — aunque la captura viva haya evolucionado a otra especie.
+        if slug in captures or slug in dex:
             return CAPTURED
         if slug in sightings:
             return SEEN
@@ -119,9 +137,10 @@ class PokedexCatalog:
         sightings: dict[str, SightingAggregate],
         captures: dict[str, CaptureAggregate],
         cache: dict[str, dict[str, Any]],
+        dex: set[str],
     ) -> CatalogEntry:
         slug = str(raw.get("slug") or "")
-        status = self._status_for(slug, sightings, captures)
+        status = self._status_for(slug, sightings, captures, dex)
         name_table = raw.get("name") or {}
         name = str(name_table.get("en") or _fallback_name(slug))
         description = self._description(status, slug, raw.get("desc") or {}, cache)
@@ -144,8 +163,9 @@ class PokedexCatalog:
         sightings: dict[str, SightingAggregate],
         captures: dict[str, CaptureAggregate],
         cache: dict[str, dict[str, Any]],
+        dex: set[str],
     ) -> CatalogEntry:
-        status = self._status_for(slug, sightings, captures)
+        status = self._status_for(slug, sightings, captures, dex)
         description = self._description(status, slug, {}, cache)
         return self._build_entry(
             idx=index,
@@ -189,7 +209,16 @@ class PokedexCatalog:
     ) -> CatalogEntry:
         capture_info = captures.get(slug)
         sighting_info = sightings.get(slug)
-        species_types = cache.get(slug, {}).get("types")
+        cache_row = cache.get(slug, {})
+        species_types = cache_row.get("types")
+        base_values = [cache_row.get(key) for key in _BASE_STAT_KEYS]
+        base_stats: tuple[tuple[str, int], ...] | None = None
+        if base_values and all(value is not None for value in base_values):
+            base_stats = tuple(
+                (key, int(value))
+                for key, value in zip(_BASE_STAT_KEYS, base_values)
+                if value is not None
+            )
         return CatalogEntry(
             idx=idx,
             slug=slug,
@@ -202,4 +231,5 @@ class PokedexCatalog:
             any_shiny=capture_info.any_shiny if capture_info else False,
             times_seen=sighting_info.times_seen if sighting_info else 0,
             description=description,
+            base_stats=base_stats,
         )

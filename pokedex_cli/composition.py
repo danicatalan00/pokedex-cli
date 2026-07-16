@@ -124,6 +124,7 @@ def pokedex_catalog() -> pokedex_catalog_application.PokedexCatalog:
         sightings=SQLiteSightingsRepository(paths.DB_PATH),
         captures=collection,
         species_cache=collection,
+        dex_registry=collection,
     )
 
 

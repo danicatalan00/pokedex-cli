@@ -269,6 +269,39 @@ def _migration_008_sightings(connection: sqlite3.Connection) -> None:
         )
 
 
+def _migration_009_dex_caught(connection: sqlite3.Connection) -> None:
+    """Registro de Pokédex al estilo del juego: una especie 'capturada' lo es
+    para siempre, aunque la captura evolucione después (la fila de captures
+    cambia de especie al evolucionar y perdía el registro del preevolucionado).
+    """
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS dex_caught (
+            species TEXT NOT NULL,
+            form TEXT NOT NULL DEFAULT 'regular',
+            first_caught_at TEXT NOT NULL,
+            PRIMARY KEY (species, form)
+        )
+        """
+    )
+    connection.execute(
+        "INSERT OR IGNORE INTO dex_caught (species, form, first_caught_at) "
+        "SELECT species, form, MIN(caught_at) FROM captures GROUP BY species, form"
+    )
+    # Forense retroactivo: los avistamientos que la migración 008 rellenó
+    # desde captures llevan first_seen_at == caught_at exacto (microsegundos
+    # incluidos). Si esa especie ya no está en captures es que la captura
+    # evolucionó entre la 008 y esta migración: también estuvo capturada.
+    connection.execute(
+        """
+        INSERT OR IGNORE INTO dex_caught (species, form, first_caught_at)
+        SELECT s.species, s.form, s.first_seen_at
+        FROM sightings s
+        WHERE EXISTS (SELECT 1 FROM captures c WHERE c.caught_at = s.first_seen_at)
+        """
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     (1, _migration_001_base_schema),
     (2, _migration_002_capture_rules),
@@ -278,6 +311,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     (6, _migration_006_team_limit),
     (7, _migration_007_individuality),
     (8, _migration_008_sightings),
+    (9, _migration_009_dex_caught),
 )
 
 

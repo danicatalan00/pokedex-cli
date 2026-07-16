@@ -155,6 +155,21 @@ def test_success_with_unknown_gender_and_no_abilities_persists_nulls(tmp_path: P
     assert row["ability"] is None
 
 
+def test_success_registers_the_species_in_the_dex_forever(tmp_path: Path) -> None:
+    use_case, inventory_repository, encounter_repository = build_use_case(tmp_path)
+    seed(inventory_repository, encounter_repository)
+
+    result = use_case.execute(command())
+    assert result.capture_id is not None
+
+    connection = database.connect(tmp_path / "pokedex.db")
+    try:
+        row = connection.execute("SELECT species, form, first_caught_at FROM dex_caught").fetchone()
+        assert (row["species"], row["form"]) == ("pikachu", "regular")
+    finally:
+        connection.close()
+
+
 class SequencedRandom:
     """Replays fixed float/int sequences, one call at a time, to make the
     fixed roll order (ivs, nature, gender, ability) observable in a test."""

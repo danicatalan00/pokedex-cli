@@ -62,17 +62,27 @@ NATIONAL_DEX = [
 ]
 
 
+class FakeDexRegistry:
+    def __init__(self, species):
+        self._species = species
+
+    def dex_caught_species(self):
+        return self._species
+
+
 def catalog(
     database=NATIONAL_DEX,
     sightings=None,
     captures=None,
     species_cache=None,
+    dex_registry=None,
 ) -> PokedexCatalog:
     return PokedexCatalog(
         krabby=FakeKrabby(database),
         sightings=FakeSightings(sightings or {}),
         captures=FakeCaptures(captures or {}),
         species_cache=FakeSpeciesCache(species_cache or {}),
+        dex_registry=FakeDexRegistry(dex_registry) if dex_registry is not None else None,
     )
 
 
@@ -87,6 +97,43 @@ def test_status_is_unseen_seen_or_captured_and_entries_are_ordered_by_idx():
     assert by_slug["bulbasaur"].status == "unseen"
     assert by_slug["charmander"].status == "seen"
     assert by_slug["squirtle"].status == "captured"
+
+
+def test_dex_registry_keeps_evolved_species_captured_without_living_captures():
+    entries = catalog(
+        sightings={"charmander": SightingAggregate("2026-07-01T00:00:00+00:00", 1)},
+        captures={},
+        dex_registry={"charmander"},
+    ).execute()
+    by_slug = {entry.slug: entry for entry in entries}
+    assert by_slug["charmander"].status == "captured"
+    assert by_slug["charmander"].captures_count == 0
+
+
+def test_base_stats_come_from_the_species_cache_when_complete():
+    cache_row = {
+        "types": ["water"],
+        "hp": 44,
+        "atk": 48,
+        "def": 65,
+        "spa": 50,
+        "spd": 64,
+        "spe": 43,
+    }
+    entries = catalog(
+        captures={"squirtle": CaptureAggregate(captures_count=1, max_level=12, any_shiny=False)},
+        species_cache={"squirtle": cache_row},
+    ).execute()
+    by_slug = {entry.slug: entry for entry in entries}
+    assert by_slug["squirtle"].base_stats == (
+        ("hp", 44),
+        ("atk", 48),
+        ("def", 65),
+        ("spa", 50),
+        ("spd", 64),
+        ("spe", 43),
+    )
+    assert by_slug["bulbasaur"].base_stats is None
 
 
 def test_unseen_species_have_no_description_and_a_hidden_dex_entry_is_never_fabricated():
