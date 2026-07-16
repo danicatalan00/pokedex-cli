@@ -123,6 +123,22 @@ def test_success_atomically_consumes_ball_inserts_capture_and_marks_encounter(
     assert encounter_repository.read()["captured"] is True
 
 
+def test_legendary_capture_starts_at_level_50(tmp_path: Path) -> None:
+    use_case, inventory_repository, encounter_repository = build_use_case(tmp_path)
+    seed(inventory_repository, encounter_repository)
+
+    result = use_case.execute(replace(command(), is_legendary=True, growth_rate="slow"))
+
+    connection = database.connect(tmp_path / "pokedex.db")
+    try:
+        row = connection.execute(
+            "SELECT level, experience FROM captures WHERE id = ?", (result.capture_id,)
+        ).fetchone()
+    finally:
+        connection.close()
+    assert (row["level"], row["experience"]) == (50, 156250)
+
+
 def test_success_with_unknown_gender_and_no_abilities_persists_nulls(tmp_path: Path) -> None:
     # command() defaults gender_rate=None and abilities=(): both traits that
     # need species data the capturer didn't have must be stored as NULL.

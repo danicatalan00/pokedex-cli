@@ -315,6 +315,7 @@ class SQLiteCaptureRepository:
         shiny: bool,
         caught_at: str,
         ball_slug: str,
+        level: int,
         experience: int,
         ivs: Mapping[str, int],
         nature: str,
@@ -325,13 +326,14 @@ class SQLiteCaptureRepository:
             "INSERT INTO captures "
             "(species, form, shiny, caught_at, ball_slug, level, experience, "
             "iv_hp, iv_atk, iv_def, iv_spa, iv_spd, iv_spe, nature, gender, ability) "
-            "VALUES (?, ?, ?, ?, ?, 5, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 species,
                 form,
                 int(shiny),
                 caught_at,
                 ball_slug,
+                level,
                 experience,
                 ivs["hp"],
                 ivs["atk"],

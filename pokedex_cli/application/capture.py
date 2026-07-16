@@ -54,6 +54,7 @@ class CaptureRepository(Protocol):
         shiny: bool,
         caught_at: str,
         ball_slug: str,
+        level: int,
         experience: int,
         ivs: Mapping[str, int],
         nature: str,
@@ -152,6 +153,7 @@ class CaptureEncounter:
                 nature = roll_nature(self._random)
                 gender = gender_from_roll(command.gender_rate, self._random.random())
                 ability = roll_ability(command.abilities, self._random)
+                level = 50 if command.is_legendary else STARTING_LEVEL
                 capture_id = self._capture_repository.insert(
                     connection,
                     species=str(encounter["species"]),
@@ -159,7 +161,8 @@ class CaptureEncounter:
                     shiny=bool(encounter["shiny"]),
                     caught_at=command.caught_at,
                     ball_slug=command.ball_slug,
-                    experience=experience_for_level(command.growth_rate, STARTING_LEVEL),
+                    level=level,
+                    experience=experience_for_level(command.growth_rate, level),
                     ivs=ivs,
                     nature=nature.name,
                     gender=gender,
