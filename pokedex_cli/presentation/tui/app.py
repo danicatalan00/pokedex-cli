@@ -488,9 +488,9 @@ class PokedexApp(App[None]):
         color: {LCD_INK};
         padding: 0 2;
     }}
-    Footer {{ background: {DEX_OLIVE}; color: {LCD_INK}; }}
-    Footer > .footer--key {{ background: {DEX_RULE}; color: {LCD_PAPER}; }}
-    Footer > .footer--description {{ background: {DEX_OLIVE}; color: {LCD_INK}; }}
+    Footer {{ background: {DEX_RULE}; color: {LCD_PAPER}; }}
+    Footer > .footer--key {{ background: {LCD_INK}; color: {LCD_PAPER}; text-style: bold; }}
+    Footer > .footer--description {{ background: {DEX_PAPER}; color: {LCD_INK}; text-style: bold; }}
     DetailScreen {{ background: {DEX_OLIVE}; color: {LCD_INK}; }}
     DetailScreen #detalle-cuerpo {{
         margin: 1 2;
