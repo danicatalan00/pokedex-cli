@@ -191,6 +191,12 @@ def test_pantalla_principal_conserva_un_sprite_grande_que_cabe() -> None:
             assert screen._content is not None
             assert len(screen._content.lines) == 20
 
+            await pilot.resize_terminal(80, 22)
+            await pilot.pause()
+            assert screen._content is not None
+            assert len(screen._content.lines) < 20
+            assert len(screen._content.lines) <= screen.content_size.height
+
     asyncio.run(scenario())
 
 
@@ -215,5 +221,44 @@ def test_flechas_del_detalle_recorren_evoluciones_con_visibilidad_de_pokedex() -
             ficha = str(detail.query_one("#detalle-ficha").render())
             assert "??????" in ficha
             assert "Venusaur" not in ficha
+            assert "\n?" not in str(detail.query_one("#detalle-sprite").render())
+
+    asyncio.run(scenario())
+
+
+def test_especie_no_vista_no_añade_interrogacion_bajo_la_silueta() -> None:
+    async def scenario() -> None:
+        app = _app()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press("down", "down")
+            await pilot.pause()
+            content = app.query_one(PokedexScreenWidget)._content
+            assert content is not None
+            assert "?" not in content.lines
+
+    asyncio.run(scenario())
+
+
+def test_sprite_del_detalle_se_conserva_y_se_reescala_al_encoger() -> None:
+    async def scenario() -> None:
+        red_row = "\x1b[38;2;255;0;0m" + "█" * 20 + "\x1b[0m"
+        large_sprite = "\n".join([red_row] * 20)
+        app = PokedexApp(
+            catalog_loader=lambda: list(ENTRIES),
+            captures_loader=lambda: [dict(CAPTURE_ROW)],
+            sprite_fetcher=lambda species, form, shiny: large_sprite,
+            skip_boot=True,
+        )
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press("enter")
+            await pilot.pause()
+            widget = app.screen.query_one("#detalle-sprite")
+            assert len(str(widget.render()).splitlines()) == 20
+
+            await pilot.resize_terminal(80, 22)
+            await pilot.pause()
+            resized_lines = str(widget.render()).splitlines()
+            assert len(resized_lines) < 20
+            assert len(resized_lines) <= widget.content_size.height
 
     asyncio.run(scenario())

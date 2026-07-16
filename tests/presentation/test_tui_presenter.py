@@ -142,10 +142,14 @@ def test_detail_lines_captured_show_base_stats_and_description():
     )
     lines = presenter.detail_lines(entry_full)
     joined = "\n".join(lines)
-    assert "PS" in joined and " 44" in joined
+    assert "PS" in joined and "44" in joined
     assert "Total[/] [bold]314[/]" in joined
+    assert "█" not in joined and "━" not in joined
     assert "Se esconde en su caparazón." in joined
     assert "Enter: ficha del individuo" not in joined
+
+    detailed = "\n".join(presenter.detail_lines(entry_full, show_stat_bars=True))
+    assert "█" in detailed or "━" in detailed
 
 
 def test_detail_lines_seen_hide_description_and_stats():

@@ -109,7 +109,7 @@ def progress_summary(entries: Sequence[CatalogEntry]) -> str:
     return f"Capturados {captured} · Vistos {seen} / {total}"
 
 
-def detail_lines(entry: CatalogEntry) -> list[str]:
+def detail_lines(entry: CatalogEntry, *, show_stat_bars: bool = False) -> list[str]:
     """Lines of markup text for the ficha (bottom-right panel).
 
     Semántica de Pokédex del juego: una especie solo vista enseña nombre,
@@ -138,11 +138,18 @@ def detail_lines(entry: CatalogEntry) -> list[str]:
 
     if entry.base_stats:
         lines.append("")
-        for key, value in entry.base_stats:
-            label = STAT_SHORT_LABELS.get(key, key.upper())
-            bar = display.stat_bar_base(value, width=12)
-            colour = display.stat_color_base(value)
-            lines.append(f"[grey70]{label:>5}[/] {bar} [{colour}]{value:>3}[/]")
+        if show_stat_bars:
+            for key, value in entry.base_stats:
+                label = STAT_SHORT_LABELS.get(key, key.upper())
+                bar = display.stat_bar_base(value, width=12)
+                colour = display.stat_color_base(value)
+                lines.append(f"[grey70]{label:>5}[/] {bar} [{colour}]{value:>3}[/]")
+        else:
+            stats = " · ".join(
+                f"[grey70]{STAT_SHORT_LABELS.get(key, key.upper())}[/] [bold]{value}[/]"
+                for key, value in entry.base_stats
+            )
+            lines.append(stats)
         total = sum(value for _, value in entry.base_stats)
         lines.append(f"[grey70]Total[/] [bold]{total}[/] [dim](stats base)[/]")
     if entry.description:

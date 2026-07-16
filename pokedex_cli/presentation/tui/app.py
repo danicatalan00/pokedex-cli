@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from rich.text import Text
-from textual import work
+from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -33,9 +33,6 @@ from pokedex_cli.presentation.tui import graphics, presenter
 from pokedex_cli.presentation.tui.assets import POKEBALL_BRAILLE
 
 SCREEN_WIDTH = 44
-SCREEN_HEIGHT = 26
-SCREEN_INNER_ROWS = SCREEN_HEIGHT - 4  # fallback antes del primer layout
-SCREEN_INNER_COLS = 50
 LCD_INK = "#0f380f"
 REVEAL_INTERVAL = 0.02
 
@@ -106,6 +103,22 @@ class _ScreenContent:
     style: str = ""
 
 
+def _fitted_silhouette(sprite: str, max_rows: int, max_columns: int) -> list[str]:
+    """Silueta tan grande como permita el espacio disponible."""
+    grid = graphics.parse_ansi_sprite(sprite)
+    for scale in (2, 1):
+        lines = graphics.to_braille_silhouette(grid, scale=scale)
+        if len(lines) <= max_rows and max((len(line) for line in lines), default=0) <= max_columns:
+            return lines
+    factor = 2
+    while grid:
+        lines = graphics.to_braille_silhouette(graphics.downscale(grid, factor), scale=1)
+        if len(lines) <= max_rows and max((len(line) for line in lines), default=0) <= max_columns:
+            return lines
+        factor += 1
+    return []
+
+
 class PokedexScreenWidget(Static):
     """La pantallita LCD: revela su contenido línea a línea, como un CRT."""
 
@@ -124,6 +137,11 @@ class PokedexScreenWidget(Static):
         self._render_revealed()
         if not instant and content.lines:
             self._timer = self.set_interval(REVEAL_INTERVAL, self._reveal_step)
+
+    def on_resize(self, event: events.Resize) -> None:
+        app = self.app
+        if isinstance(app, PokedexApp):
+            self.call_after_refresh(app._rerender_selected_sprite)
 
     def _reveal_step(self) -> None:
         if self._content is None:
@@ -232,6 +250,9 @@ class DetailScreen(Screen[None]):
         # primario y el nombre como título, sobre fondo neutro oscuro.
         self._show_current()
 
+    def on_resize(self, event: events.Resize) -> None:
+        self.call_after_refresh(self._render_sprite)
+
     def action_previous_evolution(self) -> None:
         if len(self._family) > 1:
             self._family_index = (self._family_index - 1) % len(self._family)
@@ -267,6 +288,15 @@ class DetailScreen(Screen[None]):
         data_panel.styles.border = ("double", accent)
         data_panel.border_title = f"◓ {presenter.visible_name(self._entry).upper()}"
         row = self._rows[self._index] if self._rows else None
+        species_lines = presenter.detail_lines(self._entry, show_stat_bars=True)
+        if row:
+            species_lines.extend(["", "[bold gold3]INDIVIDUO[/]", *self._individual_lines(row)])
+        self.query_one("#detalle-ficha", Static).update(Text.from_markup("\n".join(species_lines)))
+        self.query_one("#detalle-evoluciones", Static).update(self._evolution_strip())
+        self.call_after_refresh(self._render_sprite)
+
+    def _render_sprite(self) -> None:
+        row = self._rows[self._index] if self._rows else None
         sprite = self._app_ref.sprite_cached(
             self._entry.slug,
             str(row["form"]) if row else "regular",
@@ -275,8 +305,12 @@ class DetailScreen(Screen[None]):
         sprite_widget = self.query_one("#detalle-sprite", Static)
         if sprite:
             if self._entry.status == UNSEEN:
-                silhouette = graphics.to_braille_silhouette(graphics.parse_ansi_sprite(sprite))
-                sprite_widget.update(Text("\n".join([*silhouette, "", "?"]), style=LCD_INK))
+                silhouette = _fitted_silhouette(
+                    sprite,
+                    max(1, sprite_widget.content_size.height),
+                    max(1, sprite_widget.content_size.width),
+                )
+                sprite_widget.update(Text("\n".join(silhouette), style=LCD_INK))
             else:
                 fitted = graphics.fit_sprite(
                     sprite,
@@ -286,11 +320,6 @@ class DetailScreen(Screen[None]):
                 sprite_widget.update(Text.from_ansi(fitted))
         else:
             sprite_widget.update(Text("(sin sprite)", style="dim"))
-        species_lines = presenter.detail_lines(self._entry)
-        if row:
-            species_lines.extend(["", "[bold gold3]INDIVIDUO[/]", *self._individual_lines(row)])
-        self.query_one("#detalle-ficha", Static).update(Text.from_markup("\n".join(species_lines)))
-        self.query_one("#detalle-evoluciones", Static).update(self._evolution_strip())
 
     def _individual_lines(self, row: dict[str, Any]) -> list[str]:
         name = display.display_name(str(row["species"]), str(row["form"]))
@@ -356,6 +385,7 @@ class PokedexApp(App[None]):
         background: #090909;
     }}
     #carcasa {{
+        height: 100%;
         border-top: thick #f6a700;
         border-left: thick #f6a700;
         border-bottom: thick #9d4f00;
@@ -370,9 +400,11 @@ class PokedexApp(App[None]):
         color: #0a0a0a;
         border-bottom: thick #ffcb05;
     }}
-    #cuerpo {{ background: #090909; padding: 0 1; }}
+    #cuerpo {{ height: 1fr; min-height: 0; background: #090909; padding: 0 1; }}
     #columna-lista {{
         width: 42%;
+        height: 100%;
+        min-height: 0;
         background: #0d0d0d;
         border: double #f6a700;
         border-title-color: #ffdc55;
@@ -394,13 +426,13 @@ class PokedexApp(App[None]):
         color: #101014;
         text-style: bold;
     }}
-    #columna-pantallas {{ width: 58%; }}
+    #columna-pantallas {{ width: 58%; height: 100%; min-height: 0; }}
     #marco-pantallita {{
         border: double #9aa0a8;
         border-title-color: #d5d9de;
         background: #9bbc0f;
-        height: 3fr;
-        min-height: {SCREEN_HEIGHT};
+        height: 75%;
+        min-height: 0;
         margin: 0 0 1 0;
         padding: 0 1;
     }}
@@ -411,8 +443,8 @@ class PokedexApp(App[None]):
         height: 100%;
     }}
     #ficha {{
-        height: 1fr;
-        min-height: 6;
+        height: 25%;
+        min-height: 0;
         border: double #e56b00;
         border-title-color: #ffdc55;
         background: #0d0d0d;
@@ -611,11 +643,11 @@ class PokedexApp(App[None]):
             )
             return
         if entry.status == UNSEEN:
-            grid = graphics.parse_ansi_sprite(sprite)
-            silhouette = graphics.to_braille_silhouette(grid)
-            if len(silhouette) > SCREEN_INNER_ROWS:
-                silhouette = graphics.to_braille_silhouette(grid, scale=1)
-            silhouette = [*silhouette, "", "?"]
+            silhouette = _fitted_silhouette(
+                sprite,
+                max(1, screen_widget.content_size.height),
+                max(1, screen_widget.content_size.width),
+            )
             screen_widget.show(_ScreenContent(silhouette, ansi=False, style=LCD_INK))
         else:
             fitted = graphics.fit_sprite(
@@ -624,6 +656,17 @@ class PokedexApp(App[None]):
                 max(1, screen_widget.content_size.width),
             )
             screen_widget.show(_ScreenContent(fitted.split("\n"), ansi=True))
+
+    def on_resize(self, event: events.Resize) -> None:
+        self.call_after_refresh(self._rerender_selected_sprite)
+
+    def _rerender_selected_sprite(self) -> None:
+        entry = self._selected_entry() if self._entries else None
+        if entry is None:
+            return
+        key = (entry.slug, "regular", False)
+        if key in self._sprite_cache:
+            self._sprite_ready(entry, self._sprite_cache[key])
 
     # --- eventos ------------------------------------------------------------
 
