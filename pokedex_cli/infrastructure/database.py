@@ -234,6 +234,41 @@ def _migration_007_individuality(connection: sqlite3.Connection) -> None:
         )
 
 
+def _migration_008_sightings(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sightings (
+            species TEXT NOT NULL,
+            form TEXT NOT NULL DEFAULT 'regular',
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            times_seen INTEGER NOT NULL DEFAULT 1 CHECK (times_seen >= 1),
+            PRIMARY KEY (species, form)
+        )
+        """
+    )
+    # Retroactive backfill, idempotent via INSERT OR IGNORE: every species the
+    # player already caught or had waiting counts as "seen" from day one.
+    for species, form, caught_at in connection.execute(
+        "SELECT species, form, caught_at FROM captures"
+    ).fetchall():
+        connection.execute(
+            "INSERT OR IGNORE INTO sightings (species, form, first_seen_at, last_seen_at) "
+            "VALUES (?, ?, ?, ?)",
+            (species, form, caught_at, caught_at),
+        )
+    encounter = connection.execute(
+        "SELECT species, form, seen_at FROM encounter_state WHERE singleton = 1"
+    ).fetchone()
+    if encounter is not None:
+        species, form, seen_at = encounter[0], encounter[1], encounter[2]
+        connection.execute(
+            "INSERT OR IGNORE INTO sightings (species, form, first_seen_at, last_seen_at) "
+            "VALUES (?, ?, ?, ?)",
+            (species, form, seen_at, seen_at),
+        )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     (1, _migration_001_base_schema),
     (2, _migration_002_capture_rules),
@@ -242,6 +277,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     (5, _migration_005_encounters),
     (6, _migration_006_team_limit),
     (7, _migration_007_individuality),
+    (8, _migration_008_sightings),
 )
 
 

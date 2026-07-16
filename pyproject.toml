@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 dependencies = [
     "requests>=2.31,<3",
     "rich>=13.7,<16",
+    "textual>=1,<9",
 ]
 
 [project.optional-dependencies]
@@ -54,6 +55,8 @@ omit = [
     "pokedex_cli/storage.py",
     "pokedex_cli/presentation/animation.py",
     "pokedex_cli/presentation/display.py",
+    "pokedex_cli/presentation/tui/app.py",
+    "pokedex_cli/presentation/tui/assets.py",
 ]
 
 [tool.coverage.report]

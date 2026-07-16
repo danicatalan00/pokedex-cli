@@ -6,6 +6,7 @@ import json
 import sqlite3
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -165,6 +166,7 @@ class SQLiteEncounterRepository:
         try:
             connection.execute("BEGIN IMMEDIATE")
             self._save(connection, state)
+            self._record_sighting(connection, state)
             self._mark_imported(connection)
             connection.commit()
         except BaseException:
@@ -269,6 +271,22 @@ class SQLiteEncounterRepository:
                 int(state["failed_capture_attempts"]),
                 state["escape_after_attempts"],
             ),
+        )
+
+    @staticmethod
+    def _record_sighting(connection: sqlite3.Connection, state: Encounter) -> None:
+        """Upsert the sighting inside the SAME transaction as the encounter
+        write: this is the only place a newly-painted wild Pokémon becomes
+        visible to the national catalog (``pokedex`` with no arguments)."""
+        connection.execute(
+            """
+            INSERT INTO sightings (species, form, first_seen_at, last_seen_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(species, form) DO UPDATE SET
+                last_seen_at = excluded.last_seen_at,
+                times_seen = times_seen + 1
+            """,
+            (state["species"], state["form"], state["seen_at"], state["seen_at"]),
         )
 
     @staticmethod
@@ -442,11 +460,98 @@ class SQLiteSpeciesCacheRepository:
             connection.close()
 
 
-class SQLiteCollectionRepository:
-    """Return capture rows already joined and decoded for presentation."""
+@dataclass(frozen=True)
+class SightingAggregate:
+    first_seen_at: str
+    times_seen: int
+
+
+class SQLiteSightingsRepository:
+    """Read-only species-level aggregate over ``sightings``, used by the
+    national Pokédex catalog (``PokedexCatalog``). Sightings themselves are
+    written by :class:`SQLiteEncounterRepository`, never here."""
 
     def __init__(self, database_path: Path) -> None:
         self.database_path = database_path
+
+    def aggregated(self) -> dict[str, SightingAggregate]:
+        connection = database.connect(self.database_path)
+        try:
+            rows = connection.execute(
+                "SELECT species, MIN(first_seen_at) AS first_seen_at, "
+                "SUM(times_seen) AS times_seen FROM sightings GROUP BY species"
+            ).fetchall()
+            return {
+                str(row["species"]): SightingAggregate(
+                    first_seen_at=str(row["first_seen_at"]),
+                    times_seen=int(row["times_seen"]),
+                )
+                for row in rows
+            }
+        finally:
+            connection.close()
+
+
+@dataclass(frozen=True)
+class CaptureAggregate:
+    captures_count: int
+    max_level: int
+    any_shiny: bool
+
+
+class SQLiteCollectionRepository:
+    """Return capture rows already joined and decoded for presentation.
+
+    Also owns the species-level aggregates the national Pokédex catalog
+    needs from ``captures``/``species_cache`` (chosen over a third
+    repository class since both already read those two tables for the
+    exact same "one row per species" shape).
+    """
+
+    def __init__(self, database_path: Path) -> None:
+        self.database_path = database_path
+
+    def captures_aggregated(self) -> dict[str, CaptureAggregate]:
+        connection = database.connect(self.database_path)
+        try:
+            rows = connection.execute(
+                "SELECT species, COUNT(*) AS captures_count, MAX(level) AS max_level, "
+                "MAX(shiny) AS any_shiny FROM captures GROUP BY species"
+            ).fetchall()
+            return {
+                str(row["species"]): CaptureAggregate(
+                    captures_count=int(row["captures_count"]),
+                    max_level=int(row["max_level"]),
+                    any_shiny=bool(row["any_shiny"]),
+                )
+                for row in rows
+            }
+        finally:
+            connection.close()
+
+    def species_cache_by_species(self) -> dict[str, dict[str, Any]]:
+        """One row per species (ignoring form, as the catalog only tracks
+        species-level state), preferring the 'regular' form's cache."""
+        connection = database.connect(self.database_path)
+        try:
+            rows = connection.execute(
+                "SELECT species, form, types, is_legendary, is_mythical, flavor_text "
+                "FROM species_cache ORDER BY species, (form != 'regular'), form"
+            ).fetchall()
+            result: dict[str, dict[str, Any]] = {}
+            for row in rows:
+                species = str(row["species"])
+                if species in result:
+                    continue
+                result[species] = {
+                    "types": _decode_json_string_list(row["types"]),
+                    "is_legendary": bool(row["is_legendary"]),
+                    "is_mythical": bool(row["is_mythical"]),
+                    "flavor_text": row["flavor_text"],
+                }
+            return result
+        finally:
+            connection.close()
 
     def list_captures(self) -> list[dict[str, Any]]:
         connection = database.connect(self.database_path)

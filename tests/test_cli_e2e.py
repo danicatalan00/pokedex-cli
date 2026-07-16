@@ -179,7 +179,7 @@ def test_version_one_database_is_upgraded_by_the_real_cli(tmp_path: Path) -> Non
     assert "Pikachu" in result.stdout
     upgraded = database.connect(path)
     try:
-        assert upgraded.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 7
+        assert upgraded.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 8
     finally:
         upgraded.close()
 

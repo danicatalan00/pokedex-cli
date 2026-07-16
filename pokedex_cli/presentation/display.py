@@ -203,7 +203,7 @@ def _stat_bar_current(value: int, width: int = 16) -> str:
     return f"[{color}]{'█' * filled}[/][grey30]{'━' * (width - filled)}[/]"
 
 
-def _nature_ability_line(row: dict) -> Text:
+def _nature_ability_markup(row: dict) -> str:
     """`Naturaleza Firme (+Ataque −At. Esp.) · Habilidad Torrent`, with a
     hint to run `pokedex refresh` while gender/ability are still unknown."""
     nature = row.get("nature")
@@ -226,7 +226,20 @@ def _nature_ability_line(row: dict) -> Text:
     line = " · ".join(parts)
     if row.get("gender_rate") is None:
         line += "  [dim](datos pendientes: pokedex refresh)[/]"
-    return Text.from_markup(line)
+    return line
+
+
+def _nature_ability_line(row: dict) -> Text:
+    return Text.from_markup(_nature_ability_markup(row))
+
+
+# Public aliases kept deliberately thin: the TUI detail screen (Phase B)
+# reuses this module's stat-bar/nature markup instead of duplicating it,
+# without renaming or otherwise touching the CLI's existing call sites.
+nature_ability_markup = _nature_ability_markup
+stat_bar_current = _stat_bar_current
+stat_color_current = _stat_color_current
+gender_suffix = _gender_suffix
 
 
 def render_vision_card(console: Console, row: dict, sprite: str | None) -> None:

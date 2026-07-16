@@ -17,7 +17,7 @@ def test_new_database_enables_integrity_and_concurrency_pragmas(tmp_path: Path) 
         versions = connection.execute(
             "SELECT version FROM schema_migrations ORDER BY version"
         ).fetchall()
-        assert [row[0] for row in versions] == [1, 2, 3, 4, 5, 6, 7]
+        assert [row[0] for row in versions] == [1, 2, 3, 4, 5, 6, 7, 8]
     finally:
         connection.close()
 
@@ -39,12 +39,13 @@ def test_migrations_are_idempotent(tmp_path: Path) -> None:
             (5, 1),
             (6, 1),
             (7, 1),
+            (8, 1),
         ]
     finally:
         second.close()
 
 
-@pytest.mark.parametrize("historical_version", range(1, 8))
+@pytest.mark.parametrize("historical_version", range(1, 9))
 def test_every_recorded_historical_schema_upgrades_without_losing_captures(
     tmp_path: Path, historical_version: int
 ) -> None:
@@ -64,7 +65,7 @@ def test_every_recorded_historical_schema_upgrades_without_losing_captures(
         assert [
             row[0]
             for row in upgraded.execute("SELECT version FROM schema_migrations ORDER BY version")
-        ] == [1, 2, 3, 4, 5, 6, 7]
+        ] == [1, 2, 3, 4, 5, 6, 7, 8]
         assert database._columns(upgraded, "captures") >= {
             "ball_slug",
             "level",
@@ -194,3 +195,85 @@ def test_migration_007_backfills_deterministic_ivs_and_nature_but_not_gender_or_
         assert row["nature"] == expected_nature.name
     finally:
         again.close()
+
+
+def test_migration_008_backfills_sightings_from_captures_and_encounter_state(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "sightings.db"
+    old = sqlite3.connect(path)
+    database.migrate(old, database.MIGRATIONS[:7])
+    old.execute(
+        "INSERT INTO captures (species, form, shiny, caught_at) "
+        "VALUES ('pikachu', 'regular', 0, '2026-07-10T08:00:00+00:00')"
+    )
+    old.execute(
+        "INSERT INTO encounter_state "
+        "(singleton, species, form, shiny, seen_at, captured, failed_capture_attempts) "
+        "VALUES (1, 'eevee', 'regular', 0, '2026-07-14T09:00:00+00:00', 0, 0)"
+    )
+    old.commit()
+    old.close()
+
+    upgraded = database.connect(path)
+    try:
+        rows = {
+            row["species"]: (
+                row["form"],
+                row["first_seen_at"],
+                row["last_seen_at"],
+                row["times_seen"],
+            )
+            for row in upgraded.execute("SELECT * FROM sightings")
+        }
+        assert rows["pikachu"] == (
+            "regular",
+            "2026-07-10T08:00:00+00:00",
+            "2026-07-10T08:00:00+00:00",
+            1,
+        )
+        assert rows["eevee"] == (
+            "regular",
+            "2026-07-14T09:00:00+00:00",
+            "2026-07-14T09:00:00+00:00",
+            1,
+        )
+    finally:
+        upgraded.close()
+
+    # Re-running the migration set (a fresh connection) must not duplicate
+    # rows or bump times_seen: the backfill uses INSERT OR IGNORE.
+    again = database.connect(path)
+    try:
+        assert again.execute("SELECT COUNT(*) FROM sightings").fetchone()[0] == 2
+        assert (
+            again.execute("SELECT times_seen FROM sightings WHERE species = 'pikachu'").fetchone()[
+                0
+            ]
+            == 1
+        )
+    finally:
+        again.close()
+
+
+def test_migration_008_is_idempotent_when_rerun_directly(tmp_path: Path) -> None:
+    path = tmp_path / "sightings-direct.db"
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "CREATE TABLE captures (species TEXT, form TEXT, shiny INTEGER, caught_at TEXT)"
+    )
+    connection.execute(
+        "CREATE TABLE encounter_state (singleton INTEGER PRIMARY KEY, species TEXT, "
+        "form TEXT, seen_at TEXT)"
+    )
+    connection.execute(
+        "INSERT INTO captures VALUES ('bulbasaur', 'regular', 0, '2026-07-01T00:00:00+00:00')"
+    )
+    connection.commit()
+
+    database._migration_008_sightings(connection)
+    database._migration_008_sightings(connection)
+
+    assert connection.execute("SELECT COUNT(*) FROM sightings").fetchone()[0] == 1
+    assert connection.execute("SELECT times_seen FROM sightings").fetchone()[0] == 1
+    connection.close()

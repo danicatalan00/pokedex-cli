@@ -14,6 +14,7 @@ from pokedex_cli.application import collection as collection_application
 from pokedex_cli.application import evolutions as evolution_application
 from pokedex_cli.application import hook as hook_application
 from pokedex_cli.application import individuality as individuality_application
+from pokedex_cli.application import pokedex_catalog as pokedex_catalog_application
 from pokedex_cli.application import species as species_application
 from pokedex_cli.application import team as team_application
 from pokedex_cli.application import training as training_application
@@ -30,6 +31,7 @@ from pokedex_cli.infrastructure.repositories import (
     SQLiteEvolutionRepository,
     SQLiteIndividualityRepository,
     SQLiteInventoryRepository,
+    SQLiteSightingsRepository,
     SQLiteSpeciesCacheRepository,
     SQLiteTeamRepository,
     SQLiteTrainingRepository,
@@ -113,6 +115,16 @@ def refresh_species_data() -> species_application.RefreshSpeciesData:
 
 def sprite_renderer() -> KrabbyClient:
     return KrabbyClient(pokemon_json_path=paths.KRABBY_POKEMON_JSON)
+
+
+def pokedex_catalog() -> pokedex_catalog_application.PokedexCatalog:
+    collection = SQLiteCollectionRepository(paths.DB_PATH)
+    return pokedex_catalog_application.PokedexCatalog(
+        krabby=sprite_renderer(),
+        sightings=SQLiteSightingsRepository(paths.DB_PATH),
+        captures=collection,
+        species_cache=collection,
+    )
 
 
 def process_evolutions() -> evolution_application.ProcessEvolutions:

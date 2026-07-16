@@ -16,6 +16,13 @@ fi
 "$VENV_DIR/bin/python" -c "import rich, requests" \
     || { echo "install.sh: falta rich/requests en el sistema (python3-rich / python3-requests via apt)" >&2; exit 1; }
 
+# textual alimenta `pokedex` sin argumentos (la Pokédex interactiva). Si no se
+# puede instalar (p.ej. sin red), la CLI clásica sigue funcionando igual.
+if ! "$VENV_DIR/bin/python" -c "import textual" >/dev/null 2>&1; then
+    "$VENV_DIR/bin/python" -m pip install --disable-pip-version-check "textual>=1,<9" \
+        || echo "install.sh: AVISO: no se pudo instalar textual; la Pokédex interactiva quedará deshabilitada" >&2
+fi
+
 mkdir -p "$HOME/bin"
 cat > "$HOME/bin/pokedex" <<SHIM
 #!/usr/bin/env bash

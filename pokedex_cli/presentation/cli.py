@@ -664,6 +664,8 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=(
             "Pokédex de terminal.\n\n"
+            "`pokedex` a secas (sin argumentos) abre la Pokédex interactiva: la\n"
+            "lista nacional completa, con búsqueda, filtros y pantallita retro.\n\n"
             "Cada terminal nueva pinta un Pokémon al azar sin decir cuál es. Si te\n"
             "interesa, captúralo (¡no siempre sale a la primera!) y quedará guardado\n"
             "en tu Pokédex local, enriquecido con tipos, stats y datos de PokeAPI."
@@ -911,7 +913,23 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _run_tui() -> int:
+    try:
+        from pokedex_cli.presentation.tui.app import run_tui
+    except ModuleNotFoundError as error:
+        if error.name and error.name.split(".")[0] == "textual":
+            print(
+                "La Pokédex interactiva necesita 'textual'. Reinstala con ./install.sh.",
+                file=sys.stderr,
+            )
+            return 1
+        raise
+    return run_tui()
+
+
 def main() -> int:
+    if len(sys.argv) == 1 and sys.stdin.isatty() and sys.stdout.isatty():
+        return _run_tui()
     parser = build_parser()
     args = parser.parse_args()
     try:
