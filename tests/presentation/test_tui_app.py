@@ -26,6 +26,7 @@ def _entry(
     status: str,
     gen: int = 1,
     evolution_targets: tuple[str, ...] = (),
+    evolution_family: tuple[str, ...] = (),
 ) -> CatalogEntry:
     return CatalogEntry(
         idx=idx,
@@ -40,11 +41,18 @@ def _entry(
         times_seen=3 if status != "unseen" else 0,
         description="Una descripción." if status != "unseen" else None,
         evolution_targets=evolution_targets,
+        evolution_family=evolution_family,
     )
 
 
 ENTRIES = [
-    _entry(1, "bulbasaur", "captured", evolution_targets=("ivysaur",)),
+    _entry(
+        1,
+        "bulbasaur",
+        "captured",
+        evolution_targets=("ivysaur",),
+        evolution_family=("bulbasaur", "ivysaur", "venusaur"),
+    ),
     _entry(2, "ivysaur", "seen", evolution_targets=("venusaur",)),
     _entry(3, "venusaur", "unseen"),
     _entry(25, "pikachu", "captured"),
@@ -222,6 +230,23 @@ def test_flechas_del_detalle_recorren_evoluciones_con_visibilidad_de_pokedex() -
             assert "??????" in ficha
             assert "Venusaur" not in ficha
             assert "\n?" not in str(detail.query_one("#detalle-sprite").render())
+
+    asyncio.run(scenario())
+
+
+def test_arriba_y_abajo_del_detalle_recorren_la_lista_actual() -> None:
+    async def scenario() -> None:
+        app = _app()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press("enter")
+            await pilot.pause()
+            detail = app.screen
+            assert isinstance(detail, DetailScreen)
+
+            await pilot.press("down")
+            assert detail._entry.slug == "ivysaur"
+            await pilot.press("up")
+            assert detail._entry.slug == "bulbasaur"
 
     asyncio.run(scenario())
 

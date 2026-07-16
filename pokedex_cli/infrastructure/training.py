@@ -111,6 +111,13 @@ def apply_commit_experience(
     """Reparte cada commit al azar entre Pokemon del equipo que no sean nivel 100."""
     rng = rng or random
     totals: dict[int, list[Any]] = {}
+    # Reconciliación idempotente: si el perfil de una especie evolucionada se
+    # descargó después de la animación anterior, su siguiente evolución se
+    # recupera incluso cuando no hay commits nuevos en este arranque.
+    current_team = conn.execute("SELECT * FROM captures WHERE in_team = 1 ORDER BY id").fetchall()
+    for member in current_team:
+        _, _, evolutions = _cache_progression(conn, member)
+        _queue_evolution(conn, member, evolutions, rng)
     if isinstance(commits, int):
         workloads = [0] * max(0, commits)
     else:

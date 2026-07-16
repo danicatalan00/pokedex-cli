@@ -388,8 +388,16 @@ class SQLiteSpeciesCacheRepository:
                      hp, atk, def, spa, spd, spe, is_legendary, is_mythical,
                      generation, flavor_text, form_data_exact, growth_rate,
                      base_experience, encounter_level, level_evolutions, gender_rate, abilities,
+                     height_dm, weight_hg, genus, habitat, color, shape, egg_groups,
+                     base_happiness, hatch_counter, evolution_chain,
                      fetched_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (:species, :form, :pokedex_id, :capture_rate, :types,
+                        :hp, :atk, :def, :spa, :spd, :spe, :is_legendary, :is_mythical,
+                        :generation, :flavor_text, :form_data_exact, :growth_rate,
+                        :base_experience, :encounter_level, :level_evolutions,
+                        :gender_rate, :abilities, :height_dm, :weight_hg, :genus,
+                        :habitat, :color, :shape, :egg_groups, :base_happiness,
+                        :hatch_counter, :evolution_chain, :fetched_at)
                 ON CONFLICT(species, form) DO UPDATE SET
                     pokedex_id=excluded.pokedex_id,
                     capture_rate=excluded.capture_rate,
@@ -411,33 +419,53 @@ class SQLiteSpeciesCacheRepository:
                     level_evolutions=excluded.level_evolutions,
                     gender_rate=excluded.gender_rate,
                     abilities=excluded.abilities,
+                    height_dm=excluded.height_dm,
+                    weight_hg=excluded.weight_hg,
+                    genus=excluded.genus,
+                    habitat=excluded.habitat,
+                    color=excluded.color,
+                    shape=excluded.shape,
+                    egg_groups=excluded.egg_groups,
+                    base_happiness=excluded.base_happiness,
+                    hatch_counter=excluded.hatch_counter,
+                    evolution_chain=excluded.evolution_chain,
                     fetched_at=excluded.fetched_at
                 """,
-                (
-                    species,
-                    form,
-                    data.get("pokedex_id"),
-                    data.get("capture_rate"),
-                    json.dumps(data.get("types", [])),
-                    data.get("hp"),
-                    data.get("atk"),
-                    data.get("def"),
-                    data.get("spa"),
-                    data.get("spd"),
-                    data.get("spe"),
-                    int(bool(data.get("is_legendary"))),
-                    int(bool(data.get("is_mythical"))),
-                    data.get("generation"),
-                    data.get("flavor_text"),
-                    int(bool(data.get("form_data_exact", True))),
-                    data.get("growth_rate"),
-                    data.get("base_experience"),
-                    data.get("encounter_level", 5),
-                    json.dumps(data.get("level_evolutions", [])),
-                    data.get("gender_rate"),
-                    json.dumps(data.get("abilities", [])),
-                    fetched_at,
-                ),
+                {
+                    "species": species,
+                    "form": form,
+                    "pokedex_id": data.get("pokedex_id"),
+                    "capture_rate": data.get("capture_rate"),
+                    "types": json.dumps(data.get("types", [])),
+                    "hp": data.get("hp"),
+                    "atk": data.get("atk"),
+                    "def": data.get("def"),
+                    "spa": data.get("spa"),
+                    "spd": data.get("spd"),
+                    "spe": data.get("spe"),
+                    "is_legendary": int(bool(data.get("is_legendary"))),
+                    "is_mythical": int(bool(data.get("is_mythical"))),
+                    "generation": data.get("generation"),
+                    "flavor_text": data.get("flavor_text"),
+                    "form_data_exact": int(bool(data.get("form_data_exact", True))),
+                    "growth_rate": data.get("growth_rate"),
+                    "base_experience": data.get("base_experience"),
+                    "encounter_level": data.get("encounter_level", 5),
+                    "level_evolutions": json.dumps(data.get("level_evolutions", [])),
+                    "gender_rate": data.get("gender_rate"),
+                    "abilities": json.dumps(data.get("abilities", [])),
+                    "height_dm": data.get("height_dm"),
+                    "weight_hg": data.get("weight_hg"),
+                    "genus": data.get("genus"),
+                    "habitat": data.get("habitat"),
+                    "color": data.get("color"),
+                    "shape": data.get("shape"),
+                    "egg_groups": json.dumps(data.get("egg_groups", [])),
+                    "base_happiness": data.get("base_happiness"),
+                    "hatch_counter": data.get("hatch_counter"),
+                    "evolution_chain": json.dumps(data.get("evolution_chain", [])),
+                    "fetched_at": fetched_at,
+                },
             )
             connection.commit()
         except BaseException:
@@ -554,7 +582,10 @@ class SQLiteCollectionRepository:
         try:
             rows = connection.execute(
                 "SELECT species, form, types, is_legendary, is_mythical, flavor_text, "
-                "hp, atk, def, spa, spd, spe, level_evolutions "
+                "hp, atk, def, spa, spd, spe, level_evolutions, evolution_chain, "
+                "height_dm, weight_hg, genus, habitat, color, shape, egg_groups, "
+                "growth_rate, base_experience, capture_rate, base_happiness, hatch_counter, "
+                "abilities "
                 "FROM species_cache ORDER BY species, (form != 'regular'), form"
             ).fetchall()
             result: dict[str, dict[str, Any]] = {}
@@ -574,6 +605,20 @@ class SQLiteCollectionRepository:
                     "spd": row["spd"],
                     "spe": row["spe"],
                     "level_evolutions": row["level_evolutions"],
+                    "evolution_chain": _decode_json_string_list(row["evolution_chain"]),
+                    "height_dm": row["height_dm"],
+                    "weight_hg": row["weight_hg"],
+                    "genus": row["genus"],
+                    "habitat": row["habitat"],
+                    "color": row["color"],
+                    "shape": row["shape"],
+                    "egg_groups": _decode_json_string_list(row["egg_groups"]),
+                    "growth_rate": row["growth_rate"],
+                    "base_experience": row["base_experience"],
+                    "capture_rate": row["capture_rate"],
+                    "base_happiness": row["base_happiness"],
+                    "hatch_counter": row["hatch_counter"],
+                    "abilities": _decode_json_string_list(row["abilities"]),
                 }
             return result
         finally:

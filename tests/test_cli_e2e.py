@@ -320,6 +320,57 @@ def test_pending_evolution_completes_before_trying_a_wild_encounter(tmp_path: Pa
         check.close()
 
 
+def test_evolution_chain_remains_queued_across_consecutive_terminal_opens(tmp_path: Path) -> None:
+    environment = isolated_environment(tmp_path)
+    assert run_cli(environment, "bolsas").returncode == 0
+    connection = database.connect(database_path(environment))
+    try:
+        capture_id = storage.insert_capture(connection, "charmander", "regular", False, "now")
+        connection.execute(
+            "UPDATE captures SET in_team = 1, level = 36, "
+            "pending_evolution_species = 'charmeleon', pending_evolution_form = 'regular' "
+            "WHERE id = ?",
+            (capture_id,),
+        )
+        for species in ("charmander", "charmeleon", "charizard"):
+            cache_species(connection, species)
+        connection.execute(
+            "UPDATE species_cache SET level_evolutions = ? WHERE species = 'charmeleon'",
+            ('[{"species":"charizard","form":"regular","min_level":36}]',),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    first = run_cli(environment, "hook")
+    assert first.returncode == 0
+    check = database.connect(database_path(environment))
+    try:
+        row = check.execute(
+            "SELECT species, pending_evolution_species FROM captures WHERE id = ?",
+            (capture_id,),
+        ).fetchone()
+        assert (row["species"], row["pending_evolution_species"]) == (
+            "charmeleon",
+            "charizard",
+        )
+    finally:
+        check.close()
+
+    second = run_cli(environment, "hook")
+    assert second.returncode == 0
+    check = database.connect(database_path(environment))
+    try:
+        row = check.execute(
+            "SELECT species, pending_evolution_species FROM captures WHERE id = ?",
+            (capture_id,),
+        ).fetchone()
+        assert (row["species"], row["pending_evolution_species"]) == ("charizard", None)
+        assert check.execute("SELECT COUNT(*) FROM encounter_state").fetchone()[0] == 0
+    finally:
+        check.close()
+
+
 def test_hook_is_clean_with_missing_and_available_krabby(tmp_path: Path) -> None:
     missing_environment = isolated_environment(tmp_path / "missing")
     missing_environment["PATH"] = "/usr/bin:/bin"

@@ -70,6 +70,18 @@ def test_every_recorded_historical_schema_upgrades_without_losing_captures(
             "ability",
         }
         assert "encounter_level" in database._columns(upgraded, "species_cache")
+        assert database._columns(upgraded, "species_cache") >= {
+            "height_dm",
+            "weight_hg",
+            "genus",
+            "habitat",
+            "color",
+            "shape",
+            "egg_groups",
+            "base_happiness",
+            "hatch_counter",
+            "evolution_chain",
+        }
     finally:
         upgraded.close()
 

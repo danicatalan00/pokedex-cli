@@ -123,6 +123,7 @@ def test_detail_lines_for_a_captured_entry_omit_redundant_capture_metadata():
     joined = "\n".join(lines)
     assert "Capturas:" not in joined
     assert "nivel máx." not in joined
+    assert "avistamientos" not in joined.lower()
 
 
 def test_detail_lines_captured_show_base_stats_and_description():
@@ -150,6 +151,34 @@ def test_detail_lines_captured_show_base_stats_and_description():
 
     detailed = "\n".join(presenter.detail_lines(entry_full, show_stat_bars=True))
     assert "█" in detailed or "━" in detailed
+
+
+def test_detail_lines_show_enriched_pokeapi_profile() -> None:
+    enriched = dataclasses.replace(
+        ENTRIES[0],
+        genus="Pokémon Semilla",
+        height_dm=7,
+        weight_hg=69,
+        habitat="grassland",
+        color="green",
+        shape="quadruped",
+        egg_groups=("monster", "grass"),
+        growth_rate="medium-slow",
+        base_experience=64,
+        capture_rate=45,
+        base_happiness=50,
+        hatch_counter=20,
+        abilities=("overgrow",),
+    )
+
+    detail = "\n".join(presenter.detail_lines(enriched, show_stat_bars=True))
+
+    assert "Pokémon Semilla" in detail
+    assert "0.7 m" in detail and "6.9 kg" in detail
+    assert "Pradera" in detail
+    assert "Monstruo" in detail and "Planta" in detail
+    assert "Crecimiento" in detail and "Experiencia base" in detail
+    assert "Habilidades" in detail and "Overgrow" in detail
 
 
 def test_detail_lines_seen_hide_description_and_stats():

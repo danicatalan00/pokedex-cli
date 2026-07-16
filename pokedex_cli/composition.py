@@ -139,11 +139,15 @@ def process_evolutions() -> evolution_application.ProcessEvolutions:
 def open_terminal(
     write_last_seen: Callable[[str, str, bool], None],
 ) -> hook_application.OpenTerminal:
+    species = species_data()
     return hook_application.OpenTerminal(
         evolutions=process_evolutions(),
         sync_activity=sync_training,
         start_wild_encounter=lambda generations: wild_encounters.run_hook(
             generations, write_last_seen
+        ),
+        prepare_evolution=lambda evolution: species.execute(
+            evolution.target_species, evolution.target_form
         ),
     )
 

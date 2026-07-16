@@ -30,15 +30,24 @@ class OpenTerminal:
         evolutions: EvolutionProcessor,
         sync_activity: Callable[[], tuple[Any, tuple[Any, ...]]],
         start_wild_encounter: Callable[[str], None],
+        prepare_evolution: Callable[[PendingEvolution], object | None],
     ) -> None:
         self._evolutions = evolutions
         self._sync_activity = sync_activity
         self._start_wild_encounter = start_wild_encounter
+        self._prepare_evolution = prepare_evolution
 
     def execute(self, generations: str) -> OpenTerminalResult:
-        snapshot = self._evolutions.pending()
         activity, training = self._sync_activity()
+        # La sincronización puede subir niveles y encolar evoluciones. Tomar la
+        # foto después evita que se pierdan hasta un arranque posterior.
+        snapshot = self._evolutions.pending()
         if snapshot:
+            # El perfil del destino contiene el siguiente eslabón de la cadena.
+            # Prepararlo antes de completar permite dejarlo ya encolado si el
+            # nivel actual también alcanza ese umbral.
+            for evolution in snapshot:
+                self._prepare_evolution(evolution)
             transitions = self._evolutions.execute([evolution.capture_id for evolution in snapshot])
             return OpenTerminalResult(activity, training, transitions, False)
         self._start_wild_encounter(generations)

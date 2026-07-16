@@ -309,6 +309,26 @@ def _migration_010_encounter_levels(connection: sqlite3.Connection) -> None:
     )
 
 
+def _migration_011_pokedex_profiles(connection: sqlite3.Connection) -> None:
+    """Conserva el perfil enciclopédico y la familia completa de PokéAPI."""
+    cache_columns = _columns(connection, "species_cache")
+    additions = {
+        "height_dm": "INTEGER",
+        "weight_hg": "INTEGER",
+        "genus": "TEXT",
+        "habitat": "TEXT",
+        "color": "TEXT",
+        "shape": "TEXT",
+        "egg_groups": "TEXT NOT NULL DEFAULT '[]'",
+        "base_happiness": "INTEGER",
+        "hatch_counter": "INTEGER",
+        "evolution_chain": "TEXT NOT NULL DEFAULT '[]'",
+    }
+    for column, declaration in additions.items():
+        if column not in cache_columns:
+            connection.execute(f"ALTER TABLE species_cache ADD COLUMN {column} {declaration}")
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     (1, _migration_001_base_schema),
     (2, _migration_002_capture_rules),
@@ -320,6 +340,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     (8, _migration_008_sightings),
     (9, _migration_009_dex_caught),
     (10, _migration_010_encounter_levels),
+    (11, _migration_011_pokedex_profiles),
 )
 
 

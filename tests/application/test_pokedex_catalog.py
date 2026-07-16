@@ -149,6 +149,38 @@ def test_direct_evolutions_come_from_the_species_cache():
     assert bulbasaur.evolution_targets == ("ivysaur",)
 
 
+def test_full_family_and_species_profile_come_from_the_cache():
+    entries = catalog(
+        captures={"squirtle": CaptureAggregate(1, 40, False)},
+        species_cache={
+            "squirtle": {
+                "evolution_chain": ["squirtle", "wartortle", "blastoise"],
+                "genus": "Pokémon Tortuguita",
+                "height_dm": 5,
+                "weight_hg": 90,
+                "habitat": "waters-edge",
+                "color": "blue",
+                "shape": "upright",
+                "egg_groups": ["monster", "water1"],
+                "growth_rate": "medium-slow",
+                "base_experience": 63,
+                "capture_rate": 45,
+                "base_happiness": 50,
+                "hatch_counter": 20,
+                "abilities": ["torrent"],
+            }
+        },
+    ).execute()
+
+    squirtle = next(entry for entry in entries if entry.slug == "squirtle")
+    assert squirtle.evolution_family == ("squirtle", "wartortle", "blastoise")
+    assert squirtle.genus == "Pokémon Tortuguita"
+    assert squirtle.height_dm == 5
+    assert squirtle.weight_hg == 90
+    assert squirtle.egg_groups == ("monster", "water1")
+    assert squirtle.abilities == ("torrent",)
+
+
 def test_unseen_species_have_no_description_and_a_hidden_dex_entry_is_never_fabricated():
     entries = catalog().execute()
     bulbasaur = next(entry for entry in entries if entry.slug == "bulbasaur")

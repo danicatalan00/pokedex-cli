@@ -1,8 +1,8 @@
 """La Pokédex interactiva: `pokedex` sin argumentos en un TTY.
 
-Carcasa de Pokédex clásica (plástico rojo biselado, lente azul, leds), lista
-nacional navegable con búsqueda y filtros, y una "pantallita" LCD verde donde
-cada especie se renderiza con efecto de carga retro: sprite a color si está
+Carcasa amarilla y naranja biselada, lente azul y leds; lista nacional
+navegable con búsqueda y filtros; y una pantalla crema al estilo de Rojo Fuego donde cada
+especie se renderiza con efecto de carga retro: sprite a color si está
 capturada, silueta braille si solo está vista, estática si aún no.
 
 Todo el estado que necesita la app llega por inyección (catálogo, queries de
@@ -33,7 +33,11 @@ from pokedex_cli.presentation.tui import graphics, presenter
 from pokedex_cli.presentation.tui.assets import POKEBALL_BRAILLE
 
 SCREEN_WIDTH = 44
-LCD_INK = "#0f380f"
+LCD_INK = "#241d12"
+LCD_PAPER = "#f8f8f8"
+DEX_PAPER = "#e0d8c1"
+DEX_OLIVE = "#a9c018"
+DEX_RULE = "#6c552c"
 REVEAL_INTERVAL = 0.02
 
 # Colores de tipo (hex CSS para bordes de textual; display.TYPE_COLORS usa la
@@ -58,7 +62,7 @@ TYPE_HEX = {
     "steel": "#b8b8d0",
     "fairy": "#ee99ac",
 }
-DEFAULT_ACCENT = "#3ec5a7"
+DEFAULT_ACCENT = DEX_RULE
 
 SpriteFetcher = Callable[[str, str, bool], str | None]
 CatalogLoader = Callable[[], list[CatalogEntry]]
@@ -202,14 +206,16 @@ class BootScreen(Screen[None]):
 
 
 class DetailScreen(Screen[None]):
-    """Ficha completa; ←/→ recorre la familia evolutiva."""
+    """Ficha completa; ←/→ familia, ↑/↓ lista y ,/. individuos."""
 
     BINDINGS = [
         Binding("escape,q", "dismiss", "Volver"),
-        Binding("left", "previous_evolution", "◀ evolución"),
-        Binding("right", "next_evolution", "evolución ▶"),
-        Binding("up", "previous_capture", "▲ captura"),
-        Binding("down", "next_capture", "captura ▼"),
+        Binding("left", "previous_evolution", "◀ evolución", priority=True),
+        Binding("right", "next_evolution", "evolución ▶", priority=True),
+        Binding("up", "previous_entry", "▲ Pokédex", priority=True),
+        Binding("down", "next_entry", "Pokédex ▼", priority=True),
+        Binding("comma", "previous_capture", "captura anterior"),
+        Binding("full_stop", "next_capture", "captura siguiente"),
     ]
 
     def __init__(
@@ -217,15 +223,17 @@ class DetailScreen(Screen[None]):
     ) -> None:
         super().__init__()
         self._app_ref = app_ref
+        self._list = app_ref.detail_entries()
+        self._list_index = self._list.index(entry)
         self._family = app_ref.evolution_family(entry)
         self._family_index = self._family.index(entry)
         self._entry = entry
         self._rows_by_species = {
-            member.slug: sorted(
-                (row for row in rows if row["species"] == member.slug),
+            species: sorted(
+                (row for row in rows if row["species"] == species),
                 key=lambda row: -int(row["level"]),
             )
-            for member in self._family
+            for species in {str(row["species"]) for row in rows}
         }
         self._rows = self._rows_by_species.get(entry.slug, [])
         self._index = 0
@@ -239,7 +247,7 @@ class DetailScreen(Screen[None]):
             yield VerticalScroll(Static("", id="detalle-ficha"), id="detalle-datos")
         yield Static(
             Text.from_markup(
-                "[dim]←/→ evolución · ↑/↓ captura · Escape volver[/]",
+                "[dim]←/→ familia · ↑/↓ Pokédex · ,/. individuo · Esc volver[/]",
                 justify="center",
             ),
             id="detalle-pie",
@@ -247,7 +255,7 @@ class DetailScreen(Screen[None]):
 
     def on_mount(self) -> None:
         # Panel al estilo de la vision card: marco con el color del tipo
-        # primario y el nombre como título, sobre fondo neutro oscuro.
+        # primario y el nombre como título, sobre el papel crema de la Pokédex.
         self._show_current()
 
     def on_resize(self, event: events.Resize) -> None:
@@ -264,8 +272,26 @@ class DetailScreen(Screen[None]):
             self._select_family_member()
 
     def _select_family_member(self) -> None:
-        self._entry = self._family[self._family_index]
-        self._rows = self._rows_by_species.get(self._entry.slug, [])
+        entry = self._family[self._family_index]
+        if entry in self._list:
+            self._list_index = self._list.index(entry)
+        self._set_entry(entry)
+
+    def action_previous_entry(self) -> None:
+        if self._list:
+            self._list_index = (self._list_index - 1) % len(self._list)
+            self._set_entry(self._list[self._list_index])
+
+    def action_next_entry(self) -> None:
+        if self._list:
+            self._list_index = (self._list_index + 1) % len(self._list)
+            self._set_entry(self._list[self._list_index])
+
+    def _set_entry(self, entry: CatalogEntry) -> None:
+        self._entry = entry
+        self._family = self._app_ref.evolution_family(entry)
+        self._family_index = self._family.index(entry)
+        self._rows = self._rows_by_species.get(entry.slug, [])
         self._index = 0
         self._show_current()
 
@@ -382,7 +408,7 @@ class PokedexApp(App[None]):
 
     CSS = f"""
     Screen {{
-        background: #090909;
+        background: #17140c;
     }}
     #carcasa {{
         height: 100%;
@@ -390,54 +416,55 @@ class PokedexApp(App[None]):
         border-left: thick #f6a700;
         border-bottom: thick #9d4f00;
         border-right: thick #9d4f00;
-        background: #090909;
+        background: {DEX_OLIVE};
     }}
     #cabecera {{
         height: 3;
         padding: 0 2;
         content-align: left middle;
-        background: #e56b00;
-        color: #0a0a0a;
-        border-bottom: thick #ffcb05;
+        background: {DEX_OLIVE};
+        color: {LCD_INK};
+        border-bottom: thick {DEX_RULE};
     }}
-    #cuerpo {{ height: 1fr; min-height: 0; background: #090909; padding: 0 1; }}
+    #cuerpo {{ height: 1fr; min-height: 0; background: {DEX_PAPER}; padding: 0 1; }}
     #columna-lista {{
         width: 42%;
         height: 100%;
         min-height: 0;
-        background: #0d0d0d;
-        border: double #f6a700;
-        border-title-color: #ffdc55;
+        background: {DEX_PAPER};
+        color: {LCD_INK};
+        border: double {DEX_RULE};
+        border-title-color: {DEX_RULE};
         margin: 0 1 0 0;
     }}
     #busqueda {{
-        background: #050505;
-        color: #ffcb05;
-        border: tall #e56b00;
+        background: {LCD_PAPER};
+        color: {LCD_INK};
+        border: tall {DEX_OLIVE};
     }}
     #lista {{
-        background: #0d0d0d;
-        color: #f8f3e7;
-        scrollbar-color: #e56b00;
-        scrollbar-background: #161616;
+        background: {DEX_PAPER};
+        color: {LCD_INK};
+        scrollbar-color: {DEX_OLIVE};
+        scrollbar-background: #c4b99d;
     }}
     #lista > .option-list--option-highlighted {{
-        background: #ffcb05;
-        color: #101014;
+        background: {DEX_OLIVE};
+        color: #111108;
         text-style: bold;
     }}
     #columna-pantallas {{ width: 58%; height: 100%; min-height: 0; }}
     #marco-pantallita {{
-        border: double #9aa0a8;
-        border-title-color: #d5d9de;
-        background: #9bbc0f;
+        border: double {DEX_RULE};
+        border-title-color: {DEX_RULE};
+        background: {LCD_PAPER};
         height: 75%;
         min-height: 0;
         margin: 0 0 1 0;
         padding: 0 1;
     }}
     #pantallita {{
-        background: #9bbc0f;
+        background: {LCD_PAPER};
         color: {LCD_INK};
         content-align: center middle;
         height: 100%;
@@ -445,45 +472,50 @@ class PokedexApp(App[None]):
     #ficha {{
         height: 25%;
         min-height: 0;
-        border: double #e56b00;
-        border-title-color: #ffdc55;
-        background: #0d0d0d;
-        color: #f8f3e7;
+        border: double {DEX_RULE};
+        border-title-color: {DEX_RULE};
+        background: {DEX_PAPER};
+        color: {LCD_INK};
         padding: 0 2;
     }}
-    Footer {{ background: #e56b00; color: #0a0a0a; }}
-    DetailScreen {{ background: #090909; }}
+    Footer {{ background: {DEX_OLIVE}; color: {LCD_INK}; }}
+    DetailScreen {{ background: {DEX_OLIVE}; color: {LCD_INK}; }}
     DetailScreen #detalle-cuerpo {{
         margin: 1 2;
+        background: {DEX_PAPER};
     }}
     DetailScreen #detalle-visual {{ width: 50%; margin: 0 1 0 0; }}
     DetailScreen #detalle-pantalla {{
         height: 1fr;
-        border: double #ffcb05;
-        background: #9bbc0f;
+        border: double {DEX_RULE};
+        background: {LCD_PAPER};
         padding: 1;
     }}
     DetailScreen #detalle-sprite {{
         height: 100%;
-        background: #9bbc0f;
+        background: {LCD_PAPER};
         content-align: center middle;
     }}
     DetailScreen #detalle-evoluciones {{
         height: 4;
-        border: double #e56b00;
-        background: #0d0d0d;
-        color: #f8f3e7;
+        border: double {DEX_RULE};
+        background: {DEX_OLIVE};
+        color: {LCD_INK};
         content-align: center middle;
     }}
     DetailScreen #detalle-datos {{
         width: 50%;
         border: double {DEFAULT_ACCENT};
-        border-title-color: #ffdc55;
-        background: #0d0d0d;
-        color: #f8f3e7;
+        border-title-color: {DEX_RULE};
+        background: {DEX_PAPER};
+        color: {LCD_INK};
         padding: 1 2;
     }}
-    DetailScreen #detalle-pie {{ height: 1; background: #090909; color: #ffb02e; }}
+    DetailScreen #detalle-pie {{
+        height: 1;
+        background: {DEX_OLIVE};
+        color: {LCD_INK};
+    }}
     """
 
     def __init__(
@@ -546,11 +578,19 @@ class PokedexApp(App[None]):
             self._captures_rows = self._captures_loader()
         return self._captures_rows
 
+    def detail_entries(self) -> list[CatalogEntry]:
+        """La ficha conserva exactamente el orden y filtros de la lista visible."""
+        return list(self._filtered)
+
     def evolution_family(self, selected: CatalogEntry) -> list[CatalogEntry]:
-        """Familia conectada por evoluciones directas, ordenada por Pokédex."""
+        """Familia completa, incluso si las preevoluciones ya no son capturas vivas."""
         by_slug = {entry.slug: entry for entry in self._entries}
         neighbours: dict[str, set[str]] = {slug: set() for slug in by_slug}
         for entry in self._entries:
+            family = [slug for slug in entry.evolution_family if slug in by_slug]
+            for first, second in zip(family, family[1:]):
+                neighbours[first].add(second)
+                neighbours[second].add(first)
             for target in entry.evolution_targets:
                 if target in by_slug:
                     neighbours[entry.slug].add(target)
@@ -603,7 +643,7 @@ class PokedexApp(App[None]):
         gen_label = "Todas" if self._gen_filter is None else f"Gen {self._gen_filter}"
         header = (
             "[#85ddff]◉[/][#28aafd]◉[/]  [red1]●[/][yellow1]●[/][green1]●[/]"
-            f"   [bold white]POKÉDEX[/]   [grey93]{progress}[/]"
+            f"   [bold #241d12]POKÉDEX[/]   [#352a18]{progress}[/]"
             f"   [dim]f: {status_label} · g: {gen_label}[/]"
         )
         self.query_one("#cabecera", Static).update(Text.from_markup(header))

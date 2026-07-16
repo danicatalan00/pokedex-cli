@@ -79,6 +79,19 @@ class CommitTrainingTests(unittest.TestCase):
         self.assertEqual(after["in_team"], 1)
         self.assertIsNone(after["pending_evolution_species"])
 
+    def test_reconciles_an_eligible_evolution_without_new_commits(self):
+        self.conn.execute(
+            "UPDATE captures SET level = 16, experience = ?",
+            (progression.experience_for_level("medium-slow", 16),),
+        )
+        self.conn.commit()
+
+        results = progression.apply_commit_experience(self.conn, 0, rng=random.Random(7))
+
+        pokemon = self.conn.execute("SELECT * FROM captures").fetchone()
+        self.assertEqual(results, ())
+        self.assertEqual(pokemon["pending_evolution_species"], "ivysaur")
+
 
 if __name__ == "__main__":
     unittest.main()

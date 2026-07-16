@@ -86,11 +86,15 @@ only_mutate = [
     "pokedex_cli/domain/progression.py",
     "pokedex_cli/domain/rewards.py",
     "pokedex_cli/application/activity.py",
+    "pokedex_cli/application/hook.py",
+    "pokedex_cli/infrastructure/training.py",
 ]
 pytest_add_cli_args_test_selection = [
     "tests/domain/test_capture.py",
     "tests/domain/test_progression.py",
     "tests/domain/test_rewards.py",
     "tests/application/test_activity.py",
+    "tests/application/test_hook.py",
+    "tests/test_progression.py",
 ]
 mutate_only_covered_lines = true

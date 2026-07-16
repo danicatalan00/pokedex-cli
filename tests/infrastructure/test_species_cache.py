@@ -26,6 +26,16 @@ def payload(pokedex_id=25):
         "level_evolutions": [{"species": "raichu", "form": "regular", "min_level": 20}],
         "gender_rate": 4,
         "abilities": ["static", "lightning-rod"],
+        "height_dm": 4,
+        "weight_hg": 60,
+        "genus": "Pokémon Ratón",
+        "habitat": "forest",
+        "color": "yellow",
+        "shape": "quadruped",
+        "egg_groups": ["field", "fairy"],
+        "base_happiness": 50,
+        "hatch_counter": 10,
+        "evolution_chain": ["pichu", "pikachu", "raichu"],
     }
 
 
@@ -41,6 +51,11 @@ def test_sqlite_species_cache_round_trips_and_updates_payload(tmp_path):
     assert cached["encounter_level"] == 20
     assert cached["gender_rate"] == 4
     assert json.loads(cached["abilities"]) == ["static", "lightning-rod"]
+    assert cached["height_dm"] == 4
+    assert cached["weight_hg"] == 60
+    assert cached["genus"] == "Pokémon Ratón"
+    assert json.loads(cached["egg_groups"]) == ["field", "fairy"]
+    assert json.loads(cached["evolution_chain"]) == ["pichu", "pikachu", "raichu"]
 
     repository.put("pikachu", "regular", payload(26), "2026-07-16T10:00:00+00:00")
     updated = repository.get("pikachu", "regular")

@@ -47,6 +47,43 @@ def _flavor_text(species_json: JsonObject) -> str | None:
     return None
 
 
+def _genus(species_json: JsonObject) -> str | None:
+    for lang in ("es", "en"):
+        for entry in species_json.get("genera", []):
+            if entry.get("language", {}).get("name") == lang:
+                value = entry.get("genus")
+                return str(value) if value else None
+    return None
+
+
+def _resource_name(resource: object) -> str | None:
+    if not isinstance(resource, dict):
+        return None
+    value = resource.get("name")
+    return str(value) if value else None
+
+
+def _evolution_chain(
+    species_json: JsonObject,
+    fetch_json: JsonFetcher | None = None,
+) -> list[str]:
+    chain_url = species_json.get("evolution_chain", {}).get("url")
+    fetch = fetch_json or _get_json
+    chain_json = fetch(chain_url) if chain_url else None
+    root = chain_json.get("chain", {}) if chain_json else {}
+    family: list[str] = []
+
+    def visit(node: JsonObject) -> None:
+        name = node.get("species", {}).get("name")
+        if name and name not in family:
+            family.append(str(name))
+        for child in node.get("evolves_to", []):
+            visit(child)
+
+    visit(root)
+    return family
+
+
 def _pokemon_abilities(pokemon_json: JsonObject) -> list[str]:
     """Non-hidden abilities in slot order (Gen 3 canon: no hidden abilities)."""
     visible = [
@@ -68,6 +105,8 @@ def _pokemon_stats_and_types(pokemon_json: JsonObject) -> JsonObject:
     return {
         "types": types,
         "base_experience": pokemon_json.get("base_experience"),
+        "height_dm": pokemon_json.get("height"),
+        "weight_hg": pokemon_json.get("weight"),
         "abilities": _pokemon_abilities(pokemon_json),
         **stats,
     }

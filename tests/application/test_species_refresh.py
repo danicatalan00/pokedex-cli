@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 from pokedex_cli.application.species import RefreshSpeciesData, SpeciesIdentity
 
 
-def test_refresh_clears_cache_then_refetches_every_captured_identity() -> None:
+def test_refresh_updates_living_captures_without_erasing_evolved_profiles() -> None:
     catalog = MagicMock()
     catalog.captured.return_value = (
         SpeciesIdentity("pichu", "regular"),
@@ -14,7 +14,7 @@ def test_refresh_clears_cache_then_refetches_every_captured_identity() -> None:
 
     result = RefreshSpeciesData(catalog=catalog, species=species).execute()
 
-    catalog.clear.assert_called_once_with()
+    catalog.clear.assert_not_called()
     assert species.execute.call_args_list[0].args == ("pichu", "regular")
     assert species.execute.call_args_list[0].kwargs == {"refresh": True}
     assert species.execute.call_args_list[1].args == ("slowking", "galar")

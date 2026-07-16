@@ -59,11 +59,9 @@ def cmd_hook(args: argparse.Namespace) -> int:
     result = _open_terminal_use_case(write_last_seen).execute(args.generations)
     _print_training(result.training)
     if result.evolutions:
-        species_data = _species_data_use_case()
         for pokemon in result.evolutions:
             target_species = pokemon.target_species
             target_form = pokemon.target_form
-            species_data.execute(target_species, target_form)
             animation.play_evolution_animation(
                 console,
                 pokemon.species,
@@ -555,6 +553,9 @@ def _open_terminal_use_case(write_last_seen) -> hook_application.OpenTerminal:
         sync_activity=_sync_training,
         start_wild_encounter=lambda generations: composition.run_wild_encounter(
             generations, write_last_seen
+        ),
+        prepare_evolution=lambda evolution: _species_data_use_case().execute(
+            evolution.target_species, evolution.target_form
         ),
     )
 

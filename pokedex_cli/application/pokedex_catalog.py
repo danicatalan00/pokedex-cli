@@ -32,6 +32,20 @@ class CatalogEntry:
     # si no hay caché de especie. Solo la ficha de especies capturadas las usa.
     base_stats: tuple[tuple[str, int], ...] | None = None
     evolution_targets: tuple[str, ...] = ()
+    evolution_family: tuple[str, ...] = ()
+    genus: str | None = None
+    height_dm: int | None = None
+    weight_hg: int | None = None
+    habitat: str | None = None
+    color: str | None = None
+    shape: str | None = None
+    egg_groups: tuple[str, ...] = ()
+    growth_rate: str | None = None
+    base_experience: int | None = None
+    capture_rate: int | None = None
+    base_happiness: int | None = None
+    hatch_counter: int | None = None
+    abilities: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -232,6 +246,9 @@ class PokedexCatalog:
             for option in raw_evolutions
             if isinstance(option, dict) and option.get("species")
         )
+        evolution_family = tuple(str(member) for member in cache_row.get("evolution_chain") or ())
+        egg_groups = tuple(str(group) for group in cache_row.get("egg_groups") or ())
+        abilities = tuple(str(ability) for ability in cache_row.get("abilities") or ())
         return CatalogEntry(
             idx=idx,
             slug=slug,
@@ -246,4 +263,38 @@ class PokedexCatalog:
             description=description,
             base_stats=base_stats,
             evolution_targets=evolution_targets,
+            evolution_family=evolution_family,
+            genus=str(cache_row["genus"]) if cache_row.get("genus") else None,
+            height_dm=(
+                int(cache_row["height_dm"]) if cache_row.get("height_dm") is not None else None
+            ),
+            weight_hg=(
+                int(cache_row["weight_hg"]) if cache_row.get("weight_hg") is not None else None
+            ),
+            habitat=str(cache_row["habitat"]) if cache_row.get("habitat") else None,
+            color=str(cache_row["color"]) if cache_row.get("color") else None,
+            shape=str(cache_row["shape"]) if cache_row.get("shape") else None,
+            egg_groups=egg_groups,
+            growth_rate=(str(cache_row["growth_rate"]) if cache_row.get("growth_rate") else None),
+            base_experience=(
+                int(cache_row["base_experience"])
+                if cache_row.get("base_experience") is not None
+                else None
+            ),
+            capture_rate=(
+                int(cache_row["capture_rate"])
+                if cache_row.get("capture_rate") is not None
+                else None
+            ),
+            base_happiness=(
+                int(cache_row["base_happiness"])
+                if cache_row.get("base_happiness") is not None
+                else None
+            ),
+            hatch_counter=(
+                int(cache_row["hatch_counter"])
+                if cache_row.get("hatch_counter") is not None
+                else None
+            ),
+            abilities=abilities,
         )

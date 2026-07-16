@@ -147,10 +147,22 @@ class PokeApiClient:
             "gender_rate": species_json.get("gender_rate"),
             "generation": species_json.get("generation", {}).get("name"),
             "growth_rate": species_json.get("growth_rate", {}).get("name"),
+            "base_happiness": species_json.get("base_happiness"),
+            "hatch_counter": species_json.get("hatch_counter"),
+            "genus": parsing._genus(species_json),
+            "habitat": parsing._resource_name(species_json.get("habitat")),
+            "color": parsing._resource_name(species_json.get("color")),
+            "shape": parsing._resource_name(species_json.get("shape")),
+            "egg_groups": [
+                name
+                for group in species_json.get("egg_groups", [])
+                if (name := parsing._resource_name(group)) is not None
+            ],
             "encounter_level": parsing._encounter_level(species_json, species, fetch_evolution),
             "level_evolutions": parsing._level_evolutions(
                 species_json, pokemon_json, species, form, fetch_evolution
             ),
+            "evolution_chain": parsing._evolution_chain(species_json, fetch_evolution),
             "flavor_text": parsing._flavor_text(species_json),
             "form_data_exact": form_data_exact,
             **parsing._pokemon_stats_and_types(pokemon_json),

@@ -50,6 +50,16 @@ def species_payload() -> dict:
         "is_mythical": False,
         "generation": {"name": "generation-i"},
         "growth_rate": {"name": "medium"},
+        "base_happiness": 50,
+        "hatch_counter": 10,
+        "habitat": {"name": "forest"},
+        "color": {"name": "yellow"},
+        "shape": {"name": "quadruped"},
+        "egg_groups": [{"name": "field"}, {"name": "fairy"}],
+        "genera": [
+            {"genus": "Pokémon Ratón", "language": {"name": "es"}},
+            {"genus": "Mouse Pokémon", "language": {"name": "en"}},
+        ],
         "varieties": [{"is_default": True, "pokemon": {"name": "pikachu"}}],
         "flavor_text_entries": [],
         "evolution_chain": {},
@@ -59,6 +69,8 @@ def species_payload() -> dict:
 def pokemon_payload() -> dict:
     return {
         "base_experience": 112,
+        "height": 4,
+        "weight": 60,
         "types": [{"slot": 1, "type": {"name": "electric"}}],
         "stats": [
             {"base_stat": 35, "stat": {"name": "hp"}},
@@ -108,6 +120,15 @@ def test_success_uses_injected_session_and_explicit_timeout() -> None:
     assert result["pokedex_id"] == 25
     assert result["types"] == ["electric"]
     assert result["spe"] == 90
+    assert result["height_dm"] == 4
+    assert result["weight_hg"] == 60
+    assert result["genus"] == "Pokémon Ratón"
+    assert result["habitat"] == "forest"
+    assert result["color"] == "yellow"
+    assert result["shape"] == "quadruped"
+    assert result["egg_groups"] == ["field", "fairy"]
+    assert result["base_happiness"] == 50
+    assert result["hatch_counter"] == 10
     assert [timeout for _, timeout in session.calls] == [1.25, 1.25]
 
 
@@ -211,6 +232,7 @@ def test_evolved_species_uses_its_incoming_evolution_level() -> None:
     result = PokeApiClient(session=session).fetch_species_data("charizard", "regular")
 
     assert result["encounter_level"] == 36
+    assert result["evolution_chain"] == ["charmander", "charmeleon", "charizard"]
 
 
 def evolution_species_payload(name: str, *, is_baby: bool = False) -> dict:

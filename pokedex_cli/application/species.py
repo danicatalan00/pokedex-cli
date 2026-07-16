@@ -74,8 +74,6 @@ class RefreshResult:
 class RefreshCatalog(Protocol):
     def captured(self) -> tuple[SpeciesIdentity, ...]: ...
 
-    def clear(self) -> None: ...
-
 
 class SpeciesRefresher(Protocol):
     def execute(self, species: str, form: str, *, refresh: bool = False) -> SpeciesData | None: ...
@@ -90,7 +88,6 @@ class RefreshSpeciesData:
 
     def execute(self) -> RefreshResult:
         identities = self._catalog.captured()
-        self._catalog.clear()
         failed: list[SpeciesIdentity] = []
         for identity in identities:
             data = self._species.execute(identity.species, identity.form, refresh=True)

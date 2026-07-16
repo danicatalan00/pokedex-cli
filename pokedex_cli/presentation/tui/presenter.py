@@ -38,6 +38,58 @@ STAT_SHORT_LABELS = {
     "spe": "Vel",
 }
 
+HABITAT_LABELS = {
+    "cave": "Cueva",
+    "forest": "Bosque",
+    "grassland": "Pradera",
+    "mountain": "Montaña",
+    "rare": "Raro",
+    "rough-terrain": "Terreno abrupto",
+    "sea": "Mar",
+    "urban": "Urbano",
+    "waters-edge": "Orilla",
+}
+COLOR_LABELS = {
+    "black": "Negro",
+    "blue": "Azul",
+    "brown": "Marrón",
+    "gray": "Gris",
+    "green": "Verde",
+    "pink": "Rosa",
+    "purple": "Morado",
+    "red": "Rojo",
+    "white": "Blanco",
+    "yellow": "Amarillo",
+}
+EGG_GROUP_LABELS = {
+    "bug": "Bicho",
+    "ditto": "Ditto",
+    "dragon": "Dragón",
+    "fairy": "Hada",
+    "field": "Campo",
+    "flying": "Volador",
+    "grass": "Planta",
+    "human-like": "Humanoide",
+    "mineral": "Mineral",
+    "monster": "Monstruo",
+    "water1": "Agua 1",
+    "water2": "Agua 2",
+    "water3": "Agua 3",
+    "no-eggs": "No cría",
+}
+GROWTH_LABELS = {
+    "erratic": "Errático",
+    "fast": "Rápido",
+    "fluctuating": "Fluctuante",
+    "medium": "Medio",
+    "medium-slow": "Medio-lento",
+    "slow": "Lento",
+}
+
+
+def _human_label(value: str) -> str:
+    return value.replace("-", " ").title()
+
 
 def _fold(text: str) -> str:
     """Case/accent-insensitive fold, e.g. 'Nidoran♀' ~ 'nidoran'."""
@@ -129,7 +181,7 @@ def detail_lines(entry: CatalogEntry, *, show_stat_bars: bool = False) -> list[s
     lines = [f"[bold]#{entry.idx:03d} {visible_name(entry)}[/]"]
     if entry.types:
         lines.append(display.type_badges(list(entry.types)))
-    lines.append(f"[grey62]Gen {entry.gen} · avistamientos: {entry.times_seen}[/]")
+    lines.append(f"[grey62]Generación {entry.gen}[/]")
 
     if entry.status != CAPTURED:
         lines.append("")
@@ -152,6 +204,55 @@ def detail_lines(entry: CatalogEntry, *, show_stat_bars: bool = False) -> list[s
             lines.append(stats)
         total = sum(value for _, value in entry.base_stats)
         lines.append(f"[grey70]Total[/] [bold]{total}[/] [dim](stats base)[/]")
+    if show_stat_bars:
+        profile: list[str] = []
+        if entry.genus:
+            profile.append(f"[italic]{entry.genus}[/]")
+        physical = []
+        if entry.height_dm is not None:
+            physical.append(f"Altura [bold]{entry.height_dm / 10:g} m[/]")
+        if entry.weight_hg is not None:
+            physical.append(f"Peso [bold]{entry.weight_hg / 10:g} kg[/]")
+        if physical:
+            profile.append(" · ".join(physical))
+        taxonomy = []
+        if entry.habitat:
+            taxonomy.append(
+                f"Hábitat [bold]{HABITAT_LABELS.get(entry.habitat, _human_label(entry.habitat))}[/]"
+            )
+        if entry.color:
+            taxonomy.append(
+                f"Color [bold]{COLOR_LABELS.get(entry.color, _human_label(entry.color))}[/]"
+            )
+        if entry.shape:
+            taxonomy.append(f"Forma [bold]{_human_label(entry.shape)}[/]")
+        if taxonomy:
+            profile.append(" · ".join(taxonomy))
+        if entry.egg_groups:
+            groups = ", ".join(
+                EGG_GROUP_LABELS.get(group, _human_label(group)) for group in entry.egg_groups
+            )
+            profile.append(f"Grupos huevo [bold]{groups}[/]")
+        if profile:
+            lines.extend(["", "[bold dark_orange]PERFIL[/]", *profile])
+
+        training = []
+        if entry.growth_rate:
+            growth = GROWTH_LABELS.get(entry.growth_rate, _human_label(entry.growth_rate))
+            training.append(f"Crecimiento [bold]{growth}[/]")
+        if entry.base_experience is not None:
+            training.append(f"Experiencia base [bold]{entry.base_experience}[/]")
+        if entry.capture_rate is not None:
+            training.append(f"Captura [bold]{entry.capture_rate}/255[/]")
+        if entry.base_happiness is not None:
+            training.append(f"Amistad base [bold]{entry.base_happiness}[/]")
+        if entry.hatch_counter is not None:
+            training.append(f"Eclosión [bold]{entry.hatch_counter} ciclos[/]")
+        if entry.abilities:
+            abilities = ", ".join(_human_label(ability) for ability in entry.abilities)
+            training.append(f"Habilidades [bold]{abilities}[/]")
+        if training:
+            lines.extend(["", "[bold dark_orange]CRIANZA Y PROGRESIÓN[/]", *training])
     if entry.description:
         lines.append("")
         lines.append(f"[italic grey85]{entry.description}[/]")
