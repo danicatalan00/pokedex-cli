@@ -147,7 +147,14 @@ class BootScreen(Screen[None]):
         yield Static(Text.from_markup("\n".join(lines), justify="center"), id="boot")
 
     def on_mount(self) -> None:
-        self.set_timer(1.2, self.dismiss)
+        # OJO: el callback de un timer se `await`-ea si devuelve un awaitable,
+        # y `dismiss()` devuelve uno; awaitearlo desde un handler de la propia
+        # pantalla lanza ScreenError. El envoltorio descarta el awaitable.
+        self.set_timer(1.2, self._finish_boot)
+
+    def _finish_boot(self) -> None:
+        if self.is_current:
+            self.dismiss()
 
 
 class DetailScreen(Screen[None]):

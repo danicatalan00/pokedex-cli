@@ -125,6 +125,26 @@ def test_busqueda_en_vivo_por_nombre_y_numero() -> None:
     asyncio.run(scenario())
 
 
+def test_la_pantalla_de_arranque_se_cierra_sola_sin_error() -> None:
+    """Regresión: dismiss() desde el callback del timer lanzaba ScreenError
+    ('Can't await screen.dismiss() from the screen's message handler')."""
+
+    async def scenario() -> None:
+        app = PokedexApp(
+            catalog_loader=lambda: list(ENTRIES),
+            captures_loader=lambda: [dict(CAPTURE_ROW)],
+            sprite_fetcher=lambda species, form, shiny: SPRITE,
+            skip_boot=False,
+        )
+        async with app.run_test(size=(120, 40)) as pilot:
+            assert len(app.screen_stack) == 2  # arranque encima
+            await pilot.pause(1.6)
+            assert len(app.screen_stack) == 1  # se cerró solo, sin crash
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
 def test_detalle_solo_para_capturados() -> None:
     async def scenario() -> None:
         app = _app()
