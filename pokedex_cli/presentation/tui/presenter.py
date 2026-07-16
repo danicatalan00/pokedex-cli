@@ -149,12 +149,9 @@ def detail_lines(entry: CatalogEntry) -> list[str]:
         lines.append("")
         lines.append(f"[italic grey85]{entry.description}[/]")
     lines.append("")
-    shiny_note = " · ✨ shiny" if entry.any_shiny else ""
     if entry.captures_count:
-        lines.append(
-            f"[gold3]Capturas: {entry.captures_count} · nivel máx. {entry.max_level}{shiny_note}[/]"
-        )
-        lines.append("[dim]Enter: ficha del individuo[/]")
+        if entry.any_shiny:
+            lines.append("[bold yellow1]✨ Variante shiny registrada[/]")
     else:
         lines.append("[gold3]Registrado en tu Pokédex[/] [dim](la captura evolucionó)[/]")
     return lines

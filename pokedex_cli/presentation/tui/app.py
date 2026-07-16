@@ -33,8 +33,8 @@ from pokedex_cli.presentation.tui import graphics, presenter
 from pokedex_cli.presentation.tui.assets import POKEBALL_BRAILLE
 
 SCREEN_WIDTH = 44
-SCREEN_HEIGHT = 20
-SCREEN_INNER_ROWS = SCREEN_HEIGHT - 4  # borde + margen + línea de escaneo
+SCREEN_HEIGHT = 26
+SCREEN_INNER_ROWS = SCREEN_HEIGHT - 4  # fallback antes del primer layout
 SCREEN_INNER_COLS = 50
 LCD_INK = "#0f380f"
 REVEAL_INTERVAL = 0.02
@@ -184,13 +184,14 @@ class BootScreen(Screen[None]):
 
 
 class DetailScreen(Screen[None]):
-    """Detalle de una especie capturada: sprite grande + ficha individual;
-    ←/→ recorre tus capturas de esa especie."""
+    """Ficha completa; ←/→ recorre la familia evolutiva."""
 
     BINDINGS = [
         Binding("escape,q", "dismiss", "Volver"),
-        Binding("left", "previous_capture", "◀ captura"),
-        Binding("right", "next_capture", "captura ▶"),
+        Binding("left", "previous_evolution", "◀ evolución"),
+        Binding("right", "next_evolution", "evolución ▶"),
+        Binding("up", "previous_capture", "▲ captura"),
+        Binding("down", "next_capture", "captura ▼"),
     ]
 
     def __init__(
@@ -198,27 +199,53 @@ class DetailScreen(Screen[None]):
     ) -> None:
         super().__init__()
         self._app_ref = app_ref
+        self._family = app_ref.evolution_family(entry)
+        self._family_index = self._family.index(entry)
         self._entry = entry
-        self._rows = rows
+        self._rows_by_species = {
+            member.slug: sorted(
+                (row for row in rows if row["species"] == member.slug),
+                key=lambda row: -int(row["level"]),
+            )
+            for member in self._family
+        }
+        self._rows = self._rows_by_species.get(entry.slug, [])
         self._index = 0
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="detalle-cuerpo"):
-            yield Static("", id="detalle-sprite")
-            yield VerticalScroll(Static("", id="detalle-ficha"))
+            with Vertical(id="detalle-visual"):
+                with Vertical(id="detalle-pantalla"):
+                    yield Static("", id="detalle-sprite")
+                yield Static("", id="detalle-evoluciones")
+            yield VerticalScroll(Static("", id="detalle-ficha"), id="detalle-datos")
         yield Static(
-            Text.from_markup("[dim]←/→ cambiar de captura · Escape volver[/]", justify="center"),
+            Text.from_markup(
+                "[dim]←/→ evolución · ↑/↓ captura · Escape volver[/]",
+                justify="center",
+            ),
             id="detalle-pie",
         )
 
     def on_mount(self) -> None:
         # Panel al estilo de la vision card: marco con el color del tipo
         # primario y el nombre como título, sobre fondo neutro oscuro.
-        cuerpo = self.query_one("#detalle-cuerpo")
-        primary = self._entry.types[0] if self._entry.types else None
-        accent = TYPE_HEX.get(primary or "", DEFAULT_ACCENT)
-        cuerpo.styles.border = ("double", accent)
-        cuerpo.border_title = f"◓ {self._entry.name.upper()}"
+        self._show_current()
+
+    def action_previous_evolution(self) -> None:
+        if len(self._family) > 1:
+            self._family_index = (self._family_index - 1) % len(self._family)
+            self._select_family_member()
+
+    def action_next_evolution(self) -> None:
+        if len(self._family) > 1:
+            self._family_index = (self._family_index + 1) % len(self._family)
+            self._select_family_member()
+
+    def _select_family_member(self) -> None:
+        self._entry = self._family[self._family_index]
+        self._rows = self._rows_by_species.get(self._entry.slug, [])
+        self._index = 0
         self._show_current()
 
     def action_previous_capture(self) -> None:
@@ -232,24 +259,40 @@ class DetailScreen(Screen[None]):
             self._show_current()
 
     def _show_current(self) -> None:
-        if not self._rows:
-            self.query_one("#detalle-ficha", Static).update(
-                Text.from_markup("[dim]Sin capturas de esta especie.[/]")
-            )
-            return
-        row = self._rows[self._index]
+        primary = (
+            self._entry.types[0] if self._entry.status != UNSEEN and self._entry.types else None
+        )
+        accent = TYPE_HEX.get(primary or "", DEFAULT_ACCENT)
+        data_panel = self.query_one("#detalle-datos")
+        data_panel.styles.border = ("double", accent)
+        data_panel.border_title = f"◓ {presenter.visible_name(self._entry).upper()}"
+        row = self._rows[self._index] if self._rows else None
         sprite = self._app_ref.sprite_cached(
-            str(row["species"]), str(row["form"]), bool(row["shiny"])
+            self._entry.slug,
+            str(row["form"]) if row else "regular",
+            bool(row["shiny"]) if row else False,
         )
         sprite_widget = self.query_one("#detalle-sprite", Static)
         if sprite:
-            fitted = graphics.fit_sprite(sprite, 30, 56)
-            sprite_widget.update(Text.from_ansi(fitted))
+            if self._entry.status == UNSEEN:
+                silhouette = graphics.to_braille_silhouette(graphics.parse_ansi_sprite(sprite))
+                sprite_widget.update(Text("\n".join([*silhouette, "", "?"]), style=LCD_INK))
+            else:
+                fitted = graphics.fit_sprite(
+                    sprite,
+                    max(1, sprite_widget.content_size.height),
+                    max(1, sprite_widget.content_size.width),
+                )
+                sprite_widget.update(Text.from_ansi(fitted))
         else:
             sprite_widget.update(Text("(sin sprite)", style="dim"))
-        self.query_one("#detalle-ficha", Static).update(self._ficha(row))
+        species_lines = presenter.detail_lines(self._entry)
+        if row:
+            species_lines.extend(["", "[bold gold3]INDIVIDUO[/]", *self._individual_lines(row)])
+        self.query_one("#detalle-ficha", Static).update(Text.from_markup("\n".join(species_lines)))
+        self.query_one("#detalle-evoluciones", Static).update(self._evolution_strip())
 
-    def _ficha(self, row: dict[str, Any]) -> Text:
+    def _individual_lines(self, row: dict[str, Any]) -> list[str]:
         name = display.display_name(str(row["species"]), str(row["form"]))
         lines: list[str] = []
         header = f"[bold]{name}[/]{display.gender_suffix(row.get('gender'))}"
@@ -282,13 +325,23 @@ class DetailScreen(Screen[None]):
             )
         lines.append("")
         lines.append(display.nature_ability_markup(row))
-        return Text.from_markup("\n".join(lines))
+        return lines
+
+    def _evolution_strip(self) -> Text:
+        labels = []
+        for index, entry in enumerate(self._family):
+            marker, colour = presenter.STATUS_MARKERS[entry.status]
+            name = presenter.visible_name(entry)
+            selected = "bold reverse" if index == self._family_index else colour
+            labels.append(f"[{selected}]{marker} #{entry.idx:03d} {name}[/]")
+        return Text.from_markup("  →  ".join(labels), justify="center")
 
 
 class PokedexApp(App[None]):
     """La Pokédex de sobremesa."""
 
     TITLE = "POKÉDEX"
+    ENABLE_COMMAND_PALETTE = False
 
     BINDINGS = [
         Binding("q", "quit", "Salir"),
@@ -300,41 +353,41 @@ class PokedexApp(App[None]):
 
     CSS = f"""
     Screen {{
-        background: #15151a;
+        background: #090909;
     }}
     #carcasa {{
-        border-top: thick #c22439;
-        border-left: thick #c22439;
-        border-bottom: thick #6e0d1c;
-        border-right: thick #6e0d1c;
-        background: #15151a;
+        border-top: thick #f6a700;
+        border-left: thick #f6a700;
+        border-bottom: thick #9d4f00;
+        border-right: thick #9d4f00;
+        background: #090909;
     }}
     #cabecera {{
         height: 3;
         padding: 0 2;
         content-align: left middle;
-        background: #b71c30;
-        color: #ffffff;
-        border-bottom: thick #6e0d1c;
+        background: #e56b00;
+        color: #0a0a0a;
+        border-bottom: thick #ffcb05;
     }}
-    #cuerpo {{ background: #15151a; padding: 0 1; }}
+    #cuerpo {{ background: #090909; padding: 0 1; }}
     #columna-lista {{
         width: 42%;
-        background: #0e1116;
-        border: double #35606b;
-        border-title-color: #7fd4c1;
+        background: #0d0d0d;
+        border: double #f6a700;
+        border-title-color: #ffdc55;
         margin: 0 1 0 0;
     }}
     #busqueda {{
-        background: #0a0d11;
+        background: #050505;
         color: #ffcb05;
-        border: tall #35606b;
+        border: tall #e56b00;
     }}
     #lista {{
-        background: #0e1116;
-        color: #d5d9de;
-        scrollbar-color: #35606b;
-        scrollbar-background: #0e1116;
+        background: #0d0d0d;
+        color: #f8f3e7;
+        scrollbar-color: #e56b00;
+        scrollbar-background: #161616;
     }}
     #lista > .option-list--option-highlighted {{
         background: #ffcb05;
@@ -346,7 +399,8 @@ class PokedexApp(App[None]):
         border: double #9aa0a8;
         border-title-color: #d5d9de;
         background: #9bbc0f;
-        height: {SCREEN_HEIGHT};
+        height: 3fr;
+        min-height: {SCREEN_HEIGHT};
         margin: 0 0 1 0;
         padding: 0 1;
     }}
@@ -357,24 +411,47 @@ class PokedexApp(App[None]):
         height: 100%;
     }}
     #ficha {{
-        border: double #35606b;
-        border-title-color: #7fd4c1;
-        background: #101318;
-        color: #d5d9de;
+        height: 1fr;
+        min-height: 6;
+        border: double #e56b00;
+        border-title-color: #ffdc55;
+        background: #0d0d0d;
+        color: #f8f3e7;
         padding: 0 2;
     }}
-    Footer {{ background: #6e0d1c; color: #ffffff; }}
-    DetailScreen {{ background: #101014; }}
+    Footer {{ background: #e56b00; color: #0a0a0a; }}
+    DetailScreen {{ background: #090909; }}
     DetailScreen #detalle-cuerpo {{
-        border: double {DEFAULT_ACCENT};
-        border-title-color: #ffffff;
-        background: #14141a;
         margin: 1 2;
+    }}
+    DetailScreen #detalle-visual {{ width: 50%; margin: 0 1 0 0; }}
+    DetailScreen #detalle-pantalla {{
+        height: 1fr;
+        border: double #ffcb05;
+        background: #9bbc0f;
+        padding: 1;
+    }}
+    DetailScreen #detalle-sprite {{
+        height: 100%;
+        background: #9bbc0f;
+        content-align: center middle;
+    }}
+    DetailScreen #detalle-evoluciones {{
+        height: 4;
+        border: double #e56b00;
+        background: #0d0d0d;
+        color: #f8f3e7;
+        content-align: center middle;
+    }}
+    DetailScreen #detalle-datos {{
+        width: 50%;
+        border: double {DEFAULT_ACCENT};
+        border-title-color: #ffdc55;
+        background: #0d0d0d;
+        color: #f8f3e7;
         padding: 1 2;
     }}
-    DetailScreen #detalle-sprite {{ width: 46%; content-align: center middle; }}
-    DetailScreen #detalle-ficha {{ width: 54%; padding: 0 2; }}
-    DetailScreen #detalle-pie {{ height: 1; background: #101014; color: #6f7580; }}
+    DetailScreen #detalle-pie {{ height: 1; background: #090909; color: #ffb02e; }}
     """
 
     def __init__(
@@ -436,6 +513,25 @@ class PokedexApp(App[None]):
         if self._captures_rows is None:
             self._captures_rows = self._captures_loader()
         return self._captures_rows
+
+    def evolution_family(self, selected: CatalogEntry) -> list[CatalogEntry]:
+        """Familia conectada por evoluciones directas, ordenada por Pokédex."""
+        by_slug = {entry.slug: entry for entry in self._entries}
+        neighbours: dict[str, set[str]] = {slug: set() for slug in by_slug}
+        for entry in self._entries:
+            for target in entry.evolution_targets:
+                if target in by_slug:
+                    neighbours[entry.slug].add(target)
+                    neighbours[target].add(entry.slug)
+        family_slugs: set[str] = set()
+        pending = [selected.slug]
+        while pending:
+            slug = pending.pop()
+            if slug in family_slugs:
+                continue
+            family_slugs.add(slug)
+            pending.extend(neighbours.get(slug, ()))
+        return sorted((by_slug[slug] for slug in family_slugs), key=lambda entry: entry.idx)
 
     def _selected_entry(self) -> CatalogEntry | None:
         option_list = self.query_one("#lista", OptionList)
@@ -522,7 +618,11 @@ class PokedexApp(App[None]):
             silhouette = [*silhouette, "", "?"]
             screen_widget.show(_ScreenContent(silhouette, ansi=False, style=LCD_INK))
         else:
-            fitted = graphics.fit_sprite(sprite, SCREEN_INNER_ROWS, SCREEN_INNER_COLS)
+            fitted = graphics.fit_sprite(
+                sprite,
+                max(1, screen_widget.content_size.height),
+                max(1, screen_widget.content_size.width),
+            )
             screen_widget.show(_ScreenContent(fitted.split("\n"), ansi=True))
 
     # --- eventos ------------------------------------------------------------
@@ -560,9 +660,7 @@ class PokedexApp(App[None]):
         entry = self._selected_entry()
         if entry is None or entry.status != CAPTURED:
             return
-        rows = [row for row in self._captures() if row["species"] == entry.slug]
-        rows.sort(key=lambda row: -int(row["level"]))
-        self.push_screen(DetailScreen(self, entry, rows))
+        self.push_screen(DetailScreen(self, entry, self._captures()))
 
 
 def run_tui(

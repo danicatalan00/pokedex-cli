@@ -10,12 +10,23 @@ import pytest
 textual = pytest.importorskip("textual")
 
 from pokedex_cli.application.pokedex_catalog import CatalogEntry  # noqa: E402
-from pokedex_cli.presentation.tui.app import PokedexApp, static_noise  # noqa: E402
+from pokedex_cli.presentation.tui.app import (  # noqa: E402
+    DetailScreen,
+    PokedexApp,
+    PokedexScreenWidget,
+    static_noise,
+)
 
 SPRITE = "\x1b[38;2;255;0;0m▀▀\x1b[0m\n\x1b[38;2;0;255;0m▄▄\x1b[0m"
 
 
-def _entry(idx: int, slug: str, status: str, gen: int = 1) -> CatalogEntry:
+def _entry(
+    idx: int,
+    slug: str,
+    status: str,
+    gen: int = 1,
+    evolution_targets: tuple[str, ...] = (),
+) -> CatalogEntry:
     return CatalogEntry(
         idx=idx,
         slug=slug,
@@ -28,12 +39,13 @@ def _entry(idx: int, slug: str, status: str, gen: int = 1) -> CatalogEntry:
         any_shiny=False,
         times_seen=3 if status != "unseen" else 0,
         description="Una descripción." if status != "unseen" else None,
+        evolution_targets=evolution_targets,
     )
 
 
 ENTRIES = [
-    _entry(1, "bulbasaur", "captured"),
-    _entry(2, "ivysaur", "seen"),
+    _entry(1, "bulbasaur", "captured", evolution_targets=("ivysaur",)),
+    _entry(2, "ivysaur", "seen", evolution_targets=("venusaur",)),
     _entry(3, "venusaur", "unseen"),
     _entry(25, "pikachu", "captured"),
     _entry(152, "chikorita", "unseen", gen=2),
@@ -159,5 +171,49 @@ def test_detalle_solo_para_capturados() -> None:
             await pilot.pause()
             assert len(app.screen_stack) == 1
             await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_pantalla_principal_conserva_un_sprite_grande_que_cabe() -> None:
+    async def scenario() -> None:
+        red_row = "\x1b[38;2;255;0;0m" + "█" * 20 + "\x1b[0m"
+        large_sprite = "\n".join([red_row] * 20)
+        app = PokedexApp(
+            catalog_loader=lambda: list(ENTRIES),
+            captures_loader=lambda: [dict(CAPTURE_ROW)],
+            sprite_fetcher=lambda species, form, shiny: large_sprite,
+            skip_boot=True,
+        )
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(PokedexScreenWidget)
+            assert screen._content is not None
+            assert len(screen._content.lines) == 20
+
+    asyncio.run(scenario())
+
+
+def test_flechas_del_detalle_recorren_evoluciones_con_visibilidad_de_pokedex() -> None:
+    async def scenario() -> None:
+        app = _app()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press("enter")
+            await pilot.pause()
+            detail = app.screen
+            assert isinstance(detail, DetailScreen)
+            assert detail._entry.slug == "bulbasaur"
+
+            await pilot.press("right")
+            assert detail._entry.slug == "ivysaur"
+            ficha = str(detail.query_one("#detalle-ficha").render())
+            assert "Ivysaur" in ficha
+            assert "Datos incompletos" in ficha
+
+            await pilot.press("right")
+            assert detail._entry.slug == "venusaur"
+            ficha = str(detail.query_one("#detalle-ficha").render())
+            assert "??????" in ficha
+            assert "Venusaur" not in ficha
 
     asyncio.run(scenario())

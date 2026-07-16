@@ -48,3 +48,22 @@ def test_collection_repository_left_joins_cache_and_tolerates_corrupt_types(tmp_
     refreshed = repository.list_captures()
     assert refreshed[0]["types"] == []
     assert refreshed[0]["abilities"] == []
+
+
+def test_catalog_cache_rows_include_evolution_targets(tmp_path):
+    path = tmp_path / "pokedex.db"
+    connection = database.connect(path)
+    try:
+        connection.execute(
+            "INSERT INTO species_cache (species, form, level_evolutions, fetched_at) "
+            "VALUES ('bulbasaur', 'regular', ?, 'now')",
+            (json.dumps([{"species": "ivysaur", "form": "regular", "min_level": 16}]),),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    rows = SQLiteCollectionRepository(path).species_cache_by_species()
+    assert json.loads(rows["bulbasaur"]["level_evolutions"]) == [
+        {"species": "ivysaur", "form": "regular", "min_level": 16}
+    ]

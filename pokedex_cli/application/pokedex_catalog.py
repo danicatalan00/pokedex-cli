@@ -6,6 +6,7 @@ touching PokeAPI or spawning `krabby` itself.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -30,6 +31,7 @@ class CatalogEntry:
     # Stats base de la especie en orden (hp, atk, def, spa, spd, spe); None
     # si no hay caché de especie. Solo la ficha de especies capturadas las usa.
     base_stats: tuple[tuple[str, int], ...] | None = None
+    evolution_targets: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -219,6 +221,17 @@ class PokedexCatalog:
                 for key, value in zip(_BASE_STAT_KEYS, base_values)
                 if value is not None
             )
+        raw_evolutions = cache_row.get("level_evolutions") or []
+        if isinstance(raw_evolutions, str):
+            try:
+                raw_evolutions = json.loads(raw_evolutions)
+            except json.JSONDecodeError:
+                raw_evolutions = []
+        evolution_targets = tuple(
+            str(option["species"])
+            for option in raw_evolutions
+            if isinstance(option, dict) and option.get("species")
+        )
         return CatalogEntry(
             idx=idx,
             slug=slug,
@@ -232,4 +245,5 @@ class PokedexCatalog:
             times_seen=sighting_info.times_seen if sighting_info else 0,
             description=description,
             base_stats=base_stats,
+            evolution_targets=evolution_targets,
         )

@@ -136,6 +136,19 @@ def test_base_stats_come_from_the_species_cache_when_complete():
     assert by_slug["bulbasaur"].base_stats is None
 
 
+def test_direct_evolutions_come_from_the_species_cache():
+    entries = catalog(
+        species_cache={
+            "bulbasaur": {
+                "level_evolutions": [{"species": "ivysaur", "form": "regular", "min_level": 16}]
+            }
+        }
+    ).execute()
+
+    bulbasaur = next(entry for entry in entries if entry.slug == "bulbasaur")
+    assert bulbasaur.evolution_targets == ("ivysaur",)
+
+
 def test_unseen_species_have_no_description_and_a_hidden_dex_entry_is_never_fabricated():
     entries = catalog().execute()
     bulbasaur = next(entry for entry in entries if entry.slug == "bulbasaur")

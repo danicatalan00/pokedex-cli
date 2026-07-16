@@ -116,11 +116,13 @@ def test_progress_summary_counts_captured_and_seen_out_of_the_total():
     assert presenter.progress_summary(ENTRIES) == "Capturados 1 · Vistos 3 / 4"
 
 
-def test_detail_lines_for_a_captured_entry_include_capture_stats():
+def test_detail_lines_for_a_captured_entry_omit_redundant_capture_metadata():
     bulbasaur = ENTRIES[0]
     lines = presenter.detail_lines(bulbasaur)
     assert lines[0] == "[bold]#001 Bulbasaur[/]"
-    assert any("Capturas: 1" in line and "nivel máx. 10" in line for line in lines)
+    joined = "\n".join(lines)
+    assert "Capturas:" not in joined
+    assert "nivel máx." not in joined
 
 
 def test_detail_lines_captured_show_base_stats_and_description():
@@ -143,7 +145,7 @@ def test_detail_lines_captured_show_base_stats_and_description():
     assert "PS" in joined and " 44" in joined
     assert "Total[/] [bold]314[/]" in joined
     assert "Se esconde en su caparazón." in joined
-    assert "Enter: ficha del individuo" in joined
+    assert "Enter: ficha del individuo" not in joined
 
 
 def test_detail_lines_seen_hide_description_and_stats():

@@ -554,7 +554,7 @@ class SQLiteCollectionRepository:
         try:
             rows = connection.execute(
                 "SELECT species, form, types, is_legendary, is_mythical, flavor_text, "
-                "hp, atk, def, spa, spd, spe "
+                "hp, atk, def, spa, spd, spe, level_evolutions "
                 "FROM species_cache ORDER BY species, (form != 'regular'), form"
             ).fetchall()
             result: dict[str, dict[str, Any]] = {}
@@ -573,6 +573,7 @@ class SQLiteCollectionRepository:
                     "spa": row["spa"],
                     "spd": row["spd"],
                     "spe": row["spe"],
+                    "level_evolutions": row["level_evolutions"],
                 }
             return result
         finally:
