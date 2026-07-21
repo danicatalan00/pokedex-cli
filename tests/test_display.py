@@ -118,6 +118,7 @@ def test_ranking_table_shows_current_and_base_totals_with_new_title():
         "gender": None,
         "total": 250,
         "base_total": 226,
+        "in_team": 0,
     }
     console = Console(width=140)
     with console.capture() as captured:
@@ -126,6 +127,37 @@ def test_ranking_table_shows_current_and_base_totals_with_new_title():
     assert "Ranking (stats actuales)" in output
     assert "250" in output
     assert "226" in output
+
+
+def test_ranking_table_always_shows_team_column():
+    rows = [
+        {
+            "species": "pikachu",
+            "form": "regular",
+            "level": 50,
+            "types": ["electric"],
+            "gender": None,
+            "total": 250,
+            "base_total": 226,
+            "in_team": 1,
+        },
+        {
+            "species": "charmander",
+            "form": "regular",
+            "level": 30,
+            "types": ["fire"],
+            "gender": None,
+            "total": 180,
+            "base_total": 176,
+            "in_team": 0,
+        },
+    ]
+    console = Console(width=160)
+    with console.capture() as captured:
+        display.render_ranking_table(console, rows, missing=0)
+    output = captured.get()
+    assert "Equipo" in output
+    assert "⭐" in output
 
 
 class VisionCaptureBallTests(unittest.TestCase):

@@ -568,6 +568,8 @@ def cmd_tipos(args: argparse.Namespace) -> int:
 def cmd_ranking(args: argparse.Namespace) -> int:
     composition.backfill_individuality().execute()
     ranked, missing = _collection_queries().ranking()
+    if args.equipo:
+        ranked = [r for r in ranked if r.get("in_team")]
     display.render_ranking_table(console, ranked, missing)
     return 0
 
@@ -891,6 +893,12 @@ def build_parser() -> argparse.ArgumentParser:
         "ranking",
         help="ranking por suma de stats base",
         description="Ordena tus capturas por la suma de sus stats base, con medallas.",
+    )
+    ranking_parser.add_argument(
+        "--equipo",
+        action="store_true",
+        default=False,
+        help="muestra columna de equipo (⭐) para ver qué capturas están en tu equipo",
     )
     ranking_parser.set_defaults(func=cmd_ranking)
 
