@@ -447,6 +447,7 @@ def render_ranking_table(console: Console, rows: list[dict], missing: int) -> No
     table.add_column("Tipos")
     table.add_column("Total", justify="right")
     table.add_column("Base", justify="right")
+    table.add_column("Equipo", justify="center")
     for i, row in enumerate(rows):
         medal = MEDALS[i] if i < len(MEDALS) else str(i + 1)
         name = display_name(row["species"], row["form"]) + _gender_suffix(row.get("gender"))
@@ -457,6 +458,7 @@ def render_ranking_table(console: Console, rows: list[dict], missing: int) -> No
             type_badges(row["types"]),
             str(row["total"]),
             f"[dim]{row['base_total']}[/]",
+            "⭐" if row.get("in_team") else "",
         )
     console.print(hall_of_fame_panel("Ranking (stats actuales)", table))
     if missing:
