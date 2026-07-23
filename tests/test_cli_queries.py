@@ -175,7 +175,7 @@ def test_type_ranking_and_rare_queries_prepare_expected_rows(connection, monkeyp
     monkeypatch.setattr(cli.display, "render_legendarios_panel", rare_render)
 
     assert cli.cmd_tipos(argparse.Namespace()) == 0
-    assert cli.cmd_ranking(argparse.Namespace()) == 0
+    assert cli.cmd_ranking(argparse.Namespace(equipo=False)) == 0
     assert cli.cmd_legendarios(argparse.Namespace()) == 0
 
     assert type_render.call_args.args[1] == {"electric": 1, "psychic": 1}
