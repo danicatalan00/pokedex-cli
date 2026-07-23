@@ -27,7 +27,7 @@ from textual.timer import Timer
 from textual.widgets import Input, OptionList, Static
 from textual.widgets.option_list import Option
 
-from pokedex_cli.application.pokedex_catalog import CAPTURED, UNSEEN, CatalogEntry
+from pokedex_cli.application.pokedex_catalog import UNSEEN, CatalogEntry
 from pokedex_cli.presentation import display
 from pokedex_cli.presentation.tui import graphics, presenter
 from pokedex_cli.presentation.tui.assets import POKEBALL_BRAILLE
@@ -39,6 +39,9 @@ DEX_PAPER = "#e0d8c1"
 DEX_OLIVE = "#a9c018"
 DEX_RULE = "#6c552c"
 REVEAL_INTERVAL = 0.02
+# Krabby es un subproceso: al recorrer la lista con las flechas no queremos
+# lanzar uno por cada fila intermedia. Esperamos a que el cursor se asiente.
+SPRITE_DEBOUNCE = 0.12
 
 # Colores de tipo (hex CSS para bordes de textual; display.TYPE_COLORS usa la
 # paleta xterm de rich, que textual no entiende).
@@ -550,6 +553,7 @@ class PokedexApp(App[None]):
         self._gen_filter: int | None = None
         self._sprite_cache: dict[tuple[str, str, bool], str | None] = {}
         self._captures_rows: list[dict[str, Any]] | None = None
+        self._sprite_timer: Timer | None = None
 
     # --- composición ------------------------------------------------------
 
@@ -687,7 +691,18 @@ class PokedexApp(App[None]):
         # estado: no vista → silueta braille, vista/capturada → sprite a color.
         noise = _ScreenContent(static_noise(entry.idx, height=4), ansi=False, style=LCD_INK)
         screen_widget.show(noise, instant=True)
-        self._load_sprite(entry)
+        self._schedule_sprite(entry)
+
+    def _schedule_sprite(self, entry: CatalogEntry) -> None:
+        """Difiere krabby hasta que el cursor deja de moverse: recorrer la lista
+        con las flechas ya no encadena un subproceso por cada fila intermedia."""
+        if self._sprite_timer is not None:
+            self._sprite_timer.stop()
+        if (entry.slug, "regular", False) in self._sprite_cache:
+            # Ya está en caché: pintarlo al instante no cuesta un subproceso.
+            self._load_sprite(entry)
+            return
+        self._sprite_timer = self.set_timer(SPRITE_DEBOUNCE, lambda: self._load_sprite(entry))
 
     @work(thread=True, exclusive=True)
     def _load_sprite(self, entry: CatalogEntry) -> None:
@@ -772,7 +787,7 @@ class PokedexApp(App[None]):
 
     def action_open_detail(self) -> None:
         entry = self._selected_entry()
-        if entry is None or entry.status != CAPTURED:
+        if entry is None or entry.status == UNSEEN:
             return
         self.push_screen(DetailScreen(self, entry, self._captures()))
 

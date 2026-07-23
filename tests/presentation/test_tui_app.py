@@ -11,6 +11,7 @@ textual = pytest.importorskip("textual")
 
 from pokedex_cli.application.pokedex_catalog import CatalogEntry  # noqa: E402
 from pokedex_cli.presentation.tui.app import (  # noqa: E402
+    SPRITE_DEBOUNCE,
     DetailScreen,
     PokedexApp,
     PokedexScreenWidget,
@@ -197,7 +198,7 @@ def test_la_pantalla_de_arranque_se_cierra_sola_sin_error() -> None:
     asyncio.run(scenario())
 
 
-def test_detalle_solo_para_capturados() -> None:
+def test_detalle_para_vistos_y_capturados_no_para_pendientes() -> None:
     async def scenario() -> None:
         app = _app()
         async with app.run_test(size=(120, 40)) as pilot:
@@ -207,10 +208,50 @@ def test_detalle_solo_para_capturados() -> None:
             await pilot.press("escape")
             await pilot.pause()
             assert len(app.screen_stack) == 1
-            await pilot.press("down", "enter")  # ivysaur: solo visto -> nada
+            await pilot.press("down", "enter")  # ivysaur: solo visto -> abre detalle
+            await pilot.pause()
+            assert len(app.screen_stack) == 2
+            await pilot.press("escape")
+            await pilot.pause()
+            assert len(app.screen_stack) == 1
+            await pilot.press("down", "enter")  # venusaur: pendiente -> nada
             await pilot.pause()
             assert len(app.screen_stack) == 1
             await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_scroll_rapido_no_lanza_un_sprite_por_fila() -> None:
+    # krabby es un subproceso: recorrer la lista deprisa con las flechas no debe
+    # encadenar una carga por cada fila intermedia, solo la de destino.
+    calls: list[str] = []
+
+    def counting_fetcher(species: str, form: str, shiny: bool) -> str:
+        calls.append(species)
+        return SPRITE
+
+    entries = [_entry(i, f"mon{i:03d}", "captured") for i in range(1, 31)]
+    app = PokedexApp(
+        catalog_loader=lambda: entries,
+        captures_loader=lambda: [],
+        sprite_fetcher=counting_fetcher,
+        skip_boot=True,
+    )
+
+    async def scenario() -> None:
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            calls.clear()
+            for _ in range(10):
+                await pilot.press("down")
+            # El cursor se asienta: solo el destino final trae su sprite.
+            await asyncio.sleep(SPRITE_DEBOUNCE + 0.1)
+            await pilot.pause()
+            destino = app._selected_entry()
+            assert destino is not None
+            assert len(calls) <= 3, calls
+            assert destino.slug in calls
 
     asyncio.run(scenario())
 
