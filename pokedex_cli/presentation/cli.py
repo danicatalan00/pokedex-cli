@@ -84,7 +84,15 @@ def cmd_ver(args: argparse.Namespace) -> int:
     name = _display_name(last_seen["species"], last_seen["form"])
     if last_seen["shiny"]:
         name += " ✨shiny✨"
-    estado = "ya capturado" if last_seen["captured"] else "sin capturar"
+    status = composition.describe_encounter().execute(
+        last_seen["species"], last_seen["form"], last_seen["shiny"]
+    )
+    if status.captured:
+        estado = "ya capturado"
+    elif status.special:
+        estado = "¡sin capturar! (variante especial)"
+    else:
+        estado = "sin capturar"
     print(f"{name} — {estado}")
     return 0
 

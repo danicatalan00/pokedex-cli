@@ -67,3 +67,40 @@ def test_catalog_cache_rows_include_evolution_targets(tmp_path):
     assert json.loads(rows["bulbasaur"]["level_evolutions"]) == [
         {"species": "ivysaur", "form": "regular", "min_level": 16}
     ]
+
+
+def test_species_and_variant_capture_lookups(tmp_path):
+    path = tmp_path / "pokedex.db"
+    connection = database.connect(path)
+    try:
+        connection.execute(
+            "INSERT INTO captures (species, form, shiny, caught_at) "
+            "VALUES ('sudowoodo', 'regular', 0, '2026-07-14'), "
+            "('pikachu', 'regular', 1, '2026-07-15')"
+        )
+        # dex_caught keeps a species/form registered even without a live capture
+        # (e.g. it evolved away). No shiny column here by design.
+        connection.execute(
+            "INSERT INTO dex_caught (species, form, first_caught_at) "
+            "VALUES ('raichu', 'alola', '2026-07-16')"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    repository = SQLiteCollectionRepository(path)
+
+    # Species-level: a plain encounter of an owned species is captured
+    # regardless of the individual, and dex_caught alone counts too.
+    assert repository.is_species_captured("sudowoodo") is True
+    assert repository.is_species_captured("raichu") is True
+    assert repository.is_species_captured("mew") is False
+
+    # Alt form via dex_caught (no live capture) still registered.
+    assert repository.is_variant_captured("raichu", "alola", False) is True
+    assert repository.is_variant_captured("raichu", "galar", False) is False
+
+    # Shiny only counts against a shiny capture, never dex_caught.
+    assert repository.is_variant_captured("pikachu", "regular", True) is True
+    assert repository.is_variant_captured("sudowoodo", "regular", True) is False
+    assert repository.is_variant_captured("raichu", "alola", True) is False

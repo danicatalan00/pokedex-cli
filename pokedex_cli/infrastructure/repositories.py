@@ -577,6 +577,43 @@ class SQLiteCollectionRepository:
         finally:
             connection.close()
 
+    def is_species_captured(self, species: str) -> bool:
+        """Species-level Pokédex answer: registered as captured under any form
+        (``captures`` or the sticky ``dex_caught`` registry)."""
+        connection = database.connect(self.database_path)
+        try:
+            row = connection.execute(
+                "SELECT 1 FROM captures WHERE species = ? "
+                "UNION SELECT 1 FROM dex_caught WHERE species = ? "
+                "LIMIT 1",
+                (species, species),
+            ).fetchone()
+            return row is not None
+        finally:
+            connection.close()
+
+    def is_variant_captured(self, species: str, form: str, shiny: bool) -> bool:
+        """Exact-variant Pokédex answer for shiny/regional/mega encounters. A
+        shiny only counts against a shiny capture (``dex_caught`` does not track
+        shininess); a non-shiny alt form counts against either registry."""
+        connection = database.connect(self.database_path)
+        try:
+            if shiny:
+                row = connection.execute(
+                    "SELECT 1 FROM captures WHERE species = ? AND form = ? AND shiny = 1 LIMIT 1",
+                    (species, form),
+                ).fetchone()
+            else:
+                row = connection.execute(
+                    "SELECT 1 FROM captures WHERE species = ? AND form = ? "
+                    "UNION SELECT 1 FROM dex_caught WHERE species = ? AND form = ? "
+                    "LIMIT 1",
+                    (species, form, species, form),
+                ).fetchone()
+            return row is not None
+        finally:
+            connection.close()
+
     def species_cache_by_species(self) -> dict[str, dict[str, Any]]:
         """One row per species (ignoring form, as the catalog only tracks
         species-level state), preferring the 'regular' form's cache."""

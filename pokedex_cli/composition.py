@@ -11,6 +11,7 @@ from typing import Mapping
 
 from pokedex_cli.application import capture as capture_application
 from pokedex_cli.application import collection as collection_application
+from pokedex_cli.application import encounter as encounter_application
 from pokedex_cli.application import evolutions as evolution_application
 from pokedex_cli.application import hook as hook_application
 from pokedex_cli.application import individuality as individuality_application
@@ -154,6 +155,10 @@ def open_terminal(
 
 def read_encounter() -> dict | None:
     return paths.read_last_seen()
+
+
+def describe_encounter() -> encounter_application.DescribeEncounter:
+    return encounter_application.DescribeEncounter(SQLiteCollectionRepository(paths.DB_PATH))
 
 
 def write_encounter(species: str, form: str, shiny: bool, seen_at: str) -> None:

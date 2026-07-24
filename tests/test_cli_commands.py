@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from pokedex_cli import cli, inventory, storage
+from pokedex_cli.application.encounter import EncounterStatus
 
 
 def state():
@@ -49,6 +50,60 @@ def test_capture_short_circuits_when_no_action_is_possible(
     assert cli.cmd_capturar(args()) == expected_code
     assert text in capsys.readouterr().out
     sync.assert_not_called()
+
+
+def _stub_status(monkeypatch, status):
+    use_case = MagicMock()
+    use_case.execute.return_value = status
+    monkeypatch.setattr(cli.composition, "describe_encounter", lambda: use_case)
+    return use_case
+
+
+@pytest.mark.parametrize(
+    ("encounter", "status", "expected"),
+    [
+        # Plain species already in the Pokédex: captured, regardless of the
+        # individual waiting in this terminal.
+        (
+            seen(captured=False),
+            EncounterStatus(captured=True, special=False),
+            "ya capturado",
+        ),
+        # Plain species never registered: plainly missing, no fuss.
+        (
+            seen(captured=False),
+            EncounterStatus(captured=False, special=False),
+            "sin capturar",
+        ),
+        # Special variant we do not own: flagged.
+        (
+            seen(shiny=True),
+            EncounterStatus(captured=False, special=True),
+            "¡sin capturar! (variante especial)",
+        ),
+        # Special variant we do own: captured, no flag.
+        (
+            seen(shiny=True),
+            EncounterStatus(captured=True, special=True),
+            "ya capturado",
+        ),
+    ],
+)
+def test_ver_reports_pokedex_state_not_the_individual(
+    monkeypatch, capsys, encounter, status, expected
+):
+    monkeypatch.setattr(cli.composition, "read_encounter", lambda: encounter)
+    _stub_status(monkeypatch, status)
+
+    assert cli.cmd_ver(args()) == 0
+    out = capsys.readouterr().out
+    assert expected in out
+
+
+def test_ver_reports_when_nothing_is_waiting(monkeypatch, capsys):
+    monkeypatch.setattr(cli.composition, "read_encounter", lambda: None)
+    assert cli.cmd_ver(args()) == 1
+    assert "No hay ningún Pokémon" in capsys.readouterr().out
 
 
 def test_capture_rejects_unknown_or_empty_ball_before_external_lookup(monkeypatch):
