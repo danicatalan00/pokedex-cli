@@ -329,6 +329,22 @@ def _migration_011_pokedex_profiles(connection: sqlite3.Connection) -> None:
             connection.execute(f"ALTER TABLE species_cache ADD COLUMN {column} {declaration}")
 
 
+def _migration_012_safari_items(connection: sqlite3.Connection) -> None:
+    """Estado de Zona Safari en el encuentro: escalón de captura y turnos de ítem.
+
+    Un encuentro anterior a esta migración arranca en el escalón neutro, así que
+    los ítems solo afectan a lo que ocurra a partir de ahora.
+    """
+    columns = _columns(connection, "encounter_state")
+    additions = {
+        "catch_stage": "INTEGER NOT NULL DEFAULT 0 CHECK (catch_stage BETWEEN -3 AND 3)",
+        "item_turns": "INTEGER NOT NULL DEFAULT 0 CHECK (item_turns >= 0)",
+    }
+    for column, declaration in additions.items():
+        if column not in columns:
+            connection.execute(f"ALTER TABLE encounter_state ADD COLUMN {column} {declaration}")
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     (1, _migration_001_base_schema),
     (2, _migration_002_capture_rules),
@@ -341,6 +357,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     (9, _migration_009_dex_caught),
     (10, _migration_010_encounter_levels),
     (11, _migration_011_pokedex_profiles),
+    (12, _migration_012_safari_items),
 )
 
 

@@ -41,6 +41,8 @@ Apaga el cerebro y dirige tu agente de código hacia [INSTALL.md](INSTALL.md).
 |---|---|
 | `pokedex ver` | Ver el encuentro actual |
 | `pokedex capturar [-b bola]` | Intentar una captura |
+| `pokedex roca` | Aturdirlo: más captura, menos paciencia |
+| `pokedex cebo` | Entretenerlo: más turnos, menos captura |
 | `pokedex bolsas` | Consultar stock y actividad |
 | `pokedex list` | Ver la colección |
 | `pokedex search <nombre>` | Consultar una especie o forma |
@@ -48,6 +50,33 @@ Apaga el cerebro y dirige tu agente de código hacia [INSTALL.md](INSTALL.md).
 | `pokedex equipo [add\|remove] [id\|nombre]` | Gestionar el equipo o elegir en un selector |
 | `pokedex refresh` | Borrar y recargar desde PokeAPI los datos de las capturas |
 | `pokedex demo` | Probar animaciones sin guardar estado |
+
+## Zona Safari
+
+Un encuentro no se resuelve solo a Pokeballs. Como en Rojo Fuego y Esmeralda,
+puedes trabajarte al Pokémon salvaje antes de lanzar:
+
+| Acción | Captura | Paciencia | Estado |
+|---|---|---|---|
+| `pokedex roca` | ×2 (hasta ×8) | −1 turno | se enfada: más fácil de acertar, huye antes |
+| `pokedex cebo` | ÷2 (hasta ÷8) | +2 turnos (máx. 9) | se acerca a comer: se queda, cuesta acertarle |
+
+Rocas y cebos son ilimitados: lo que gastas es un turno del encuentro, el mismo
+recurso que consume una Pokeball fallida. Cada acción tiene su animación, y el
+estado se cuenta con palabras, como en el juego: `pokedex ver` dice si está
+enfadado o comiendo, sin cifras. Añade `--debug` si quieres los números. La
+Masterball ignora el ánimo, porque nunca falla.
+
+```console
+$ pokedex roca
+¡La roca ha dado en el blanco! Charizard está enfadado.
+
+$ pokedex ver
+Charizard — sin capturar · está enfadado
+```
+
+Para verlas sin gastar un encuentro: `pokedex demo -a roca` y `pokedex demo -a cebo`
+(añade `-r escape` para ver cómo se larga).
 
 ## Pokédex interactiva
 

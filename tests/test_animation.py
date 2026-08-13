@@ -98,6 +98,73 @@ class BallAnimationTests(unittest.TestCase):
         self.assertEqual(grid[3][5].fg, animation._BALL_WHITE)
         self.assertEqual(grid[3][5].bg, style.accent)
 
+
+class SafariItemAnimationTests(unittest.TestCase):
+    sprite = "\n".join(["\x1b[38;2;100;200;100m" + "P" * 12 + "\x1b[0m"] * 6)
+
+    def frames(self, action: str, fled: bool = False):
+        return animation.generate_safari_item_frames(
+            self.sprite, action=action, fled=fled, rng=random.Random(1)
+        )
+
+    def test_non_tty_playback_skips_decorative_external_work(self):
+        renderer = MagicMock()
+        console = Console(file=StringIO(), force_terminal=False)
+
+        animation.play_safari_item_animation(
+            console, "pikachu", "regular", False, action="rock", sprite_renderer=renderer
+        )
+
+        renderer.capture_sprite.assert_not_called()
+        renderer.render_sprite.assert_not_called()
+
+    def test_every_frame_keeps_the_canvas_size(self):
+        for action in ("rock", "bait"):
+            for fled in (False, True):
+                dimensions = {
+                    (len(frame.plain.splitlines()), max(map(len, frame.plain.splitlines())))
+                    for frame, _ in self.frames(action, fled)
+                }
+                self.assertEqual(len(dimensions), 1, (action, fled))
+
+    def test_the_rock_ends_with_the_anger_marks_over_the_pokemon(self):
+        frames = self.frames("rock")
+
+        self.assertGreater(len(frames), 8)
+        self.assertIn("#", frames[-1][0].plain)
+        self.assertIn("P", frames[-1][0].plain)
+
+    def test_the_bait_ends_with_the_pile_on_the_ground(self):
+        frames = self.frames("bait")
+
+        self.assertGreater(len(frames), 8)
+        self.assertIn("▂", frames[-1][0].plain)
+        self.assertIn("P", frames[-1][0].plain)
+
+    def test_a_scared_pokemon_leaves_the_scene_in_both_actions(self):
+        for action in ("rock", "bait"):
+            frames = self.frames(action, fled=True)
+            self.assertNotIn("P", frames[-1][0].plain, action)
+            self.assertIn("·", frames[-1][0].plain, action)
+
+    def test_fallback_without_sprite_still_tells_what_happened(self):
+        for action, expected in (("rock", "enfadado"), ("bait", "comiendo")):
+            frames = animation.generate_safari_item_frames(None, action=action)
+            self.assertGreater(len(frames), 1)
+            self.assertIn(expected, frames[-1][0].plain, action)
+        fled = animation.generate_safari_item_frames(None, action="rock", fled=True)
+        self.assertIn("ha huido", fled[-1][0].plain)
+
+    def test_unknown_action_falls_back_to_the_rock(self):
+        self.assertEqual(animation._item_style("inventada"), animation._item_style("rock"))
+
+    def test_shift_keeps_the_canvas_and_drops_what_leaves_it(self):
+        grid = [[animation.Cell("A"), animation.Cell("B")], [animation.Cell("C"), animation.Cell()]]
+
+        moved = animation._shifted(grid, cols=1)
+
+        self.assertEqual([[cell.ch for cell in row] for row in moved], [[" ", "A"], [" ", "C"]])
+
     def test_evolution_alternates_silhouettes_and_ends_in_color(self):
         old = [[animation.Cell("A", (20, 120, 20))]]
         new = [[animation.Cell("B", (200, 40, 40))]]

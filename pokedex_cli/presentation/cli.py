@@ -24,10 +24,13 @@ from pokedex_cli.application import capture as capture_application
 from pokedex_cli.application import collection as collection_application
 from pokedex_cli.application import evolutions as evolution_application
 from pokedex_cli.application import hook as hook_application
+from pokedex_cli.application import safari as safari_application
 from pokedex_cli.application import species as species_application
 from pokedex_cli.application import team as team_application
+from pokedex_cli.domain import safari as safari_rules
 from pokedex_cli.domain.identity import normalize_species
 from pokedex_cli.domain.models import Ball
+from pokedex_cli.presentation import game_text
 
 console = Console()
 _display_name = display.display_name
@@ -93,7 +96,128 @@ def cmd_ver(args: argparse.Namespace) -> int:
         estado = "¡sin capturar! (variante especial)"
     else:
         estado = "sin capturar"
+    mood = _encounter_mood(last_seen)
+    if mood:
+        estado += f" · {mood}"
     print(f"{name} — {estado}")
+    if args.debug:
+        _print_safari_debug(_encounter_safari_state(last_seen))
+    return 0
+
+
+def _format_catch_stage(stage: int) -> str:
+    """Escalón de captura tal y como lo lee un jugador: ×2 por roca, ÷2 por cebo."""
+    multiplier = safari_rules.catch_stage_multiplier(stage)
+    if stage > 0:
+        return f"×{multiplier:g}"
+    if stage < 0:
+        return f"÷{1 / multiplier:g}"
+    return "×1"
+
+
+def _format_safari_state(stage: int, patience: int | None, remaining: int) -> str:
+    state = f"captura {_format_catch_stage(stage)}"
+    if patience:
+        state += f" · paciencia {max(0, remaining)}/{patience}"
+    return state
+
+
+def _encounter_safari_state(encounter: dict) -> str:
+    """Números del encuentro: solo para `--debug`, nunca en el juego normal."""
+    stage = int(encounter.get("catch_stage") or 0)
+    patience = encounter.get("escape_after_attempts")
+    spent = int(encounter.get("failed_capture_attempts") or 0) + int(
+        encounter.get("item_turns") or 0
+    )
+    if not stage and not patience:
+        return ""
+    threshold = int(patience) if patience else None
+    return _format_safari_state(stage, threshold, (threshold or 0) - spent)
+
+
+def _encounter_mood(encounter: dict) -> str:
+    """El ánimo se cuenta como en el juego, con palabras y sin cifras."""
+    mood = safari_rules.describe_mood(int(encounter.get("catch_stage") or 0))
+    if mood is safari_rules.SafariMood.ANGRY:
+        return "está enfadado"
+    if mood is safari_rules.SafariMood.EATING:
+        return "está comiendo"
+    return ""
+
+
+def _print_safari_debug(state: str) -> None:
+    if state:
+        console.print(f"[dim]{state}[/]")
+
+
+def cmd_roca(args: argparse.Namespace) -> int:
+    return _throw_safari_item(safari_rules.SafariAction.ROCK, args)
+
+
+def cmd_cebo(args: argparse.Namespace) -> int:
+    return _throw_safari_item(safari_rules.SafariAction.BAIT, args)
+
+
+def _throw_safari_item(action: safari_rules.SafariAction, args: argparse.Namespace) -> int:
+    last_seen = composition.read_encounter()
+    if last_seen is None:
+        print("No hay ningún Pokémon a la vista. Abre una terminal nueva primero.")
+        return 1
+    if last_seen["captured"]:
+        print("Ya capturaste a este Pokémon. Espera a que aparezca otro (abre otra terminal).")
+        return 0
+
+    # Los datos de especie solo hacen falta para fijar la paciencia inicial: si
+    # el encuentro ya la tiene, este turno no toca red ni caché.
+    cache = None
+    if not last_seen.get("escape_after_attempts"):
+        cache = _species_data_use_case().execute(last_seen["species"], last_seen["form"])
+
+    result = composition.throw_safari_item().execute(
+        safari_application.SafariCommand(
+            action=action,
+            capture_rate=_cache_field(cache, "capture_rate"),
+            speed=_cache_field(cache, "spe"),
+            is_legendary=bool(_cache_field(cache, "is_legendary")),
+            is_mythical=bool(_cache_field(cache, "is_mythical")),
+        )
+    )
+    if result.status is safari_application.SafariStatus.NO_ENCOUNTER:
+        print("No hay ningún Pokémon a la vista. Abre una terminal nueva primero.")
+        return 1
+    if result.status is safari_application.SafariStatus.ALREADY_CAPTURED:
+        print("Ya capturaste a este Pokémon. Espera a que aparezca otro (abre otra terminal).")
+        return 0
+
+    name = _display_name(last_seen["species"], last_seen["form"])
+    is_rock = action is safari_rules.SafariAction.ROCK
+    fled = result.status is safari_application.SafariStatus.FLED
+
+    animation.play_safari_item_animation(
+        console,
+        last_seen["species"],
+        last_seen["form"],
+        last_seen["shiny"],
+        action=action.value,
+        fled=fled,
+        sprite_renderer=_sprite_renderer(),
+    )
+
+    throw_text = game_text.rock_message() if is_rock else game_text.bait_message()
+    if fled:
+        reason = "se ha enfadado" if is_rock else "se ha hartado del cebo"
+        console.print(f"{throw_text} [yellow][bold]{name}[/] {reason} y ha huido.[/]")
+    elif result.stage_delta == 0 and result.patience_gained == 0:
+        ignored = "ya no aparta la vista de ti" if is_rock else "ya no le hace caso al cebo"
+        console.print(f"{throw_text} [bold]{name}[/] {ignored}.")
+    elif is_rock:
+        console.print(f"{throw_text} [bold]{name}[/] está [red]enfadado[/].")
+    else:
+        console.print(f"{throw_text} [bold]{name}[/] está [green]comiendo[/].")
+    if args.debug:
+        _print_safari_debug(
+            _format_safari_state(result.catch_stage, result.patience, result.remaining_turns)
+        )
     return 0
 
 
@@ -195,7 +319,14 @@ def cmd_capturar(args: argparse.Namespace) -> int:
     chance = result.chance
     if args.debug:
         chance_label = "garantizada" if ball.guaranteed else f"{chance:.1%}"
-        console.print(f"[dim]{ball.name} · probabilidad de captura: {chance_label}[/]")
+        stage = int(last_seen.get("catch_stage") or 0)
+        mood = f" · ánimo {_format_catch_stage(stage)}" if stage else ""
+        turns = (
+            f" · turnos {result.remaining_turns}/{result.escape_after}"
+            if result.escape_after
+            else ""
+        )
+        console.print(f"[dim]{ball.name} · probabilidad de captura: {chance_label}{mood}{turns}[/]")
     caught = result.status is capture_application.CaptureStatus.CAUGHT
 
     name = _display_name(species, form)
@@ -309,6 +440,32 @@ def cmd_bolsas(args: argparse.Namespace) -> int:
             details.add_row(ball.name, effect, maximum)
         console.print()
         console.print(details)
+
+        safari = Table(title="Zona Safari", box=None, pad_edge=False)
+        safari.add_column("Acción", style="bold")
+        safari.add_column("Captura", justify="right")
+        safari.add_column("Paciencia", justify="right")
+        safari.add_column("Efecto")
+        safari.add_row(
+            "pokedex roca",
+            f"×{2**safari_rules.ROCK_STAGE_STEP:g}",
+            f"−{safari_rules.ROCK_PATIENCE_COST}",
+            "se enfada: más fácil de capturar, huye antes",
+        )
+        safari.add_row(
+            "pokedex cebo",
+            f"÷{2**-safari_rules.BAIT_STAGE_STEP:g}",
+            f"+{safari_rules.BAIT_PATIENCE_GAIN}",
+            "se acerca a comer: se queda más, cuesta acertarle",
+        )
+        console.print()
+        console.print(safari)
+        console.print(
+            "[dim]Rocas y cebos son ilimitados: cada acción gasta un turno del "
+            f"encuentro. El efecto se acumula hasta ×{2**safari_rules.MAX_CATCH_STAGE:g} "
+            f"o ÷{2**-safari_rules.MIN_CATCH_STAGE:g}, y la paciencia nunca pasa de "
+            f"{safari_rules.MAX_PATIENCE} turnos. La Masterball ignora el ánimo.[/]"
+        )
 
         work_commits = result.inventory["activity"]["work_commits"]
         console.print(
@@ -598,6 +755,9 @@ def cmd_demo(args: argparse.Namespace) -> int:
         if args.shiny:
             shiny = True
 
+    if args.accion in ("roca", "cebo"):
+        return _demo_safari_item(args, species, form, shiny)
+
     ball = composition.resolve_ball(args.bola) or composition.ball_catalog()["pokeball"]
 
     if args.result == "catch":
@@ -626,6 +786,37 @@ def cmd_demo(args: argparse.Namespace) -> int:
     )
     if not caught:
         console.print("[yellow]¡Se soltó![/] (era solo una demo)")
+    return 0
+
+
+def _demo_safari_item(args: argparse.Namespace, species: str, form: str, shiny: bool) -> int:
+    """Prueba las animaciones de Zona Safari sin gastar el encuentro real."""
+    is_rock = args.accion == "roca"
+    fled = args.result == "escape"
+    name = _display_name(species, form)
+    if shiny:
+        name += " ✨shiny✨"
+    console.print(
+        f"[dim]· demo ·[/] {'tirando una roca' if is_rock else 'echando cebo'} a "
+        f"[bold]{name}[/] → resultado: {'huida' if fled else 'se queda'} "
+        "[dim](no se guarda nada)[/]"
+    )
+    animation.play_safari_item_animation(
+        console,
+        species,
+        form,
+        shiny,
+        action="rock" if is_rock else "bait",
+        fled=fled,
+        sprite_renderer=_sprite_renderer(),
+    )
+    if fled:
+        reason = "se ha enfadado" if is_rock else "se ha hartado del cebo"
+        console.print(f"[yellow]{name} {reason} y ha huido.[/] (era solo una demo)")
+    elif is_rock:
+        console.print(f"[bold]{name}[/] está [red]enfadado[/]. (era solo una demo)")
+    else:
+        console.print(f"[bold]{name}[/] está [green]comiendo[/]. (era solo una demo)")
     return 0
 
 
@@ -758,12 +949,15 @@ def build_parser() -> argparse.ArgumentParser:
             "Ejemplos:\n"
             "  pokedex ver                     ¿qué Pokémon está esperando?\n"
             "  pokedex capturar --bola ultra  intenta capturarlo con una Ultraball\n"
+            "  pokedex roca                    lo aturde: más captura, menos paciencia\n"
+            "  pokedex cebo                    lo entretiene: más turnos, menos captura\n"
             "  pokedex bolsas                  consulta y repone tus Pokeballs especiales\n"
             "  pokedex list                    tus capturas\n"
             "  pokedex search charizard -f mega-x     ficha de una forma concreta\n"
             "  pokedex equipo add 3            mete la captura #3 en tu equipo\n"
             "  pokedex refresh                 recarga los datos de tus capturas\n"
             "  pokedex demo                    prueba la animación sin capturar\n"
+            "  pokedex demo -a roca            prueba la animación de la roca\n"
             "  pokedex demo -L                 pruébala contra un legendario al azar\n"
             "  pokedex demo-evolucion bulbasaur ivysaur  prueba una evolución\n"
             "\nAutocompletado zsh:  pokedex completion zsh > ~/.zfunc/_pokedex"
@@ -791,6 +985,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="muestra qué Pokémon está esperando (sin capturarlo)",
         description="Muestra qué Pokémon está esperando ahora mismo y si ya lo capturaste.",
     )
+    ver_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="muestra las cifras internas del encuentro (ánimo y turnos)",
+    )
     ver_parser.set_defaults(func=cmd_ver)
 
     capturar_parser = subparsers.add_parser(
@@ -812,6 +1011,36 @@ def build_parser() -> argparse.ArgumentParser:
         help="muestra la probabilidad exacta de captura",
     )
     capturar_parser.set_defaults(func=cmd_capturar)
+
+    roca_parser = subparsers.add_parser(
+        "roca",
+        aliases=["piedra"],
+        help="tira una roca: más fácil de capturar, menos paciencia",
+        description="Como en la Zona Safari: la roca lo aturde y lo enfada. Dobla la "
+        "probabilidad de captura (hasta ×8) y le quita paciencia, así que puede huir. "
+        "Las rocas son ilimitadas; lo que gastas es un turno del encuentro.",
+    )
+    roca_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="muestra las cifras internas del encuentro (ánimo y turnos)",
+    )
+    roca_parser.set_defaults(func=cmd_roca)
+
+    cebo_parser = subparsers.add_parser(
+        "cebo",
+        aliases=["caramelo"],
+        help="echa cebo: se queda más tiempo, pero cuesta acertarle",
+        description="Como en la Zona Safari: el cebo lo acerca y lo entretiene. Le da dos "
+        "turnos de paciencia (hasta un tope) y divide la probabilidad de captura por dos "
+        "mientras come. El cebo es ilimitado; lo que gastas es un turno del encuentro.",
+    )
+    cebo_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="muestra las cifras internas del encuentro (ánimo y turnos)",
+    )
+    cebo_parser.set_defaults(func=cmd_cebo)
 
     bolsas_parser = subparsers.add_parser(
         "bolsas",
@@ -967,6 +1196,13 @@ def build_parser() -> argparse.ArgumentParser:
         default="poke",
         choices=["poke", "super", "ultra", "master"],
         help="Pokeball cuya animación quieres probar (por defecto: poke)",
+    )
+    demo_parser.add_argument(
+        "-a",
+        "--accion",
+        default="bola",
+        choices=["bola", "roca", "cebo"],
+        help="qué lanzar: la Pokeball, una roca o cebo (por defecto: bola)",
     )
     demo_parser.set_defaults(func=cmd_demo)
 

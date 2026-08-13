@@ -31,6 +31,13 @@ _BALL_YELLOW = (250, 197, 35)
 _BALL_PURPLE = (137, 73, 196)
 _BALL_PINK = (245, 111, 188)
 
+# Colores de la Zona Safari: piedra y polvo para la roca, ámbar para el cebo.
+_ROCK_LIGHT = (168, 158, 146)
+_DUST = (206, 196, 176)
+_ANGER = (240, 74, 60)
+_BAIT_LIGHT = (232, 172, 74)
+_CRUMB = (246, 218, 152)
+
 
 class SpriteRenderer(Protocol):
     def capture_sprite(self, species: str, form: str, shiny: bool) -> str | None: ...
@@ -473,6 +480,230 @@ def play_capture_animation(
         # Al capturar revelamos el nombre; si se escapó sigue siendo un misterio.
         if sprite_renderer is not None:
             sprite_renderer.render_sprite(species, form, shiny, show_title=caught, info=False)
+    except Exception:
+        pass
+
+
+# --- Zona Safari ----------------------------------------------------------
+# Roca y cebo comparten escenario con la captura: se dibujan sobre el sprite
+# real. La roca llega alto, revienta en polvo y deja al Pokémon temblando y
+# enfadado; el cebo cae al suelo y el Pokémon se acerca a picotearlo. Si la
+# acción lo espanta, sale corriendo en vez de quedarse.
+
+
+@dataclass(frozen=True)
+class SafariItemAnimationStyle:
+    action: str
+    glyph: str  # el proyectil en vuelo
+    light: tuple[int, int, int]
+    spark: tuple[int, int, int]  # polvo de la roca o migas del cebo
+    mark: str  # marca de estado: venita de enfado o miga masticada
+    mark_color: tuple[int, int, int]
+    shout: str
+
+
+_ITEM_STYLES = {
+    "rock": SafariItemAnimationStyle("rock", "●", _ROCK_LIGHT, _DUST, "#", _ANGER, "¡PLOC!"),
+    "bait": SafariItemAnimationStyle("bait", "∴", _BAIT_LIGHT, _CRUMB, "·", _CRUMB, "¡ÑAM!"),
+}
+
+
+def _item_style(action: str) -> SafariItemAnimationStyle:
+    return _ITEM_STYLES.get(action, _ITEM_STYLES["rock"])
+
+
+def _shifted(grid: list[list[Cell]], rows: int = 0, cols: int = 0) -> list[list[Cell]]:
+    """Desplaza la escena manteniendo el lienzo: así ningún frame cambia de
+    tamaño y el terminal no da saltos entre cuadros."""
+    height = len(grid)
+    width = len(grid[0]) if grid else 0
+    moved = [[Cell() for _ in range(width)] for _ in range(height)]
+    for row in range(height):
+        source_row = row - rows
+        if not 0 <= source_row < height:
+            continue
+        for col in range(width):
+            source_col = col - cols
+            if 0 <= source_col < width:
+                moved[row][col] = grid[source_row][source_col].copy()
+    return moved
+
+
+def _frames_flee(grid: list[list[Cell]], style: SafariItemAnimationStyle):
+    """Se larga por la derecha dejando polvo: cierra roca y cebo por igual."""
+    height = len(grid)
+    ground = height - 1
+    for step in range(1, 5):
+        frame = _shifted(grid, cols=step * 4)
+        for trail in range(step * 4):
+            _put(frame, ground, trail, "·", style.spark)
+        yield _grid_to_text(frame), 0.07
+    dust = [[Cell() for _ in range(len(grid[0]))] for _ in range(height)]
+    for col in range(0, len(grid[0]), 3):
+        _put(dust, ground, col, "·", style.spark)
+    yield _grid_to_text(dust), 0.3
+
+
+def _frames_rock(grid: list[list[Cell]], rng, style: SafariItemAnimationStyle, fled: bool):
+    height = len(grid)
+    width = len(grid[0])
+    # La roca busca la parte alta del cuerpo, no el centro exacto.
+    target_row, target_col = max(0, height // 3), width // 2
+
+    arc = _bezier_arc(7, height, width, target_row, target_col)
+    for index, (row, col) in enumerate(arc):
+        frame = _clone(grid)
+        if index:
+            previous_row, previous_col = arc[index - 1]
+            _put(frame, previous_row, previous_col, "·", style.spark)
+        _put(frame, row, col, style.glyph, style.light)
+        yield _grid_to_text(frame), 0.045
+
+    for pulse in range(2):
+        flash = _clone(grid)
+        radius = 1 + pulse
+        for delta in range(-radius * 2, radius * 2 + 1):
+            _put(flash, target_row, target_col + delta, "░", style.spark)
+        for delta in range(-radius, radius + 1):
+            _put(flash, target_row + delta, target_col, "░", style.spark)
+        _put(flash, target_row, target_col, "✺", _DUST)
+        yield _grid_to_text(flash), max(0.06, 0.11 - pulse * 0.02)
+
+    # Las venitas van por encima de la cabeza, no sobre la cara: así el golpe
+    # se lee sin agujerear el sprite.
+    anger_row = max(0, target_row - 3)
+    anger_columns = (target_col - max(4, width // 5), target_col + max(4, width // 5))
+
+    def with_anger(scene: list[list[Cell]]) -> list[list[Cell]]:
+        for column in anger_columns:
+            _put(scene, anger_row, column, style.mark, _ANGER)
+        return scene
+
+    # Tiembla del golpe y le salen las venitas del enfado.
+    for step in range(4):
+        shake = _shifted(grid, cols=1 if step % 2 else -1)
+        yield _grid_to_text(with_anger(shake) if step else shake), 0.07
+
+    if fled:
+        yield from _frames_flee(grid, style)
+        return
+
+    yield _grid_to_text(with_anger(_clone(grid))), 0.4
+    del rng  # el enfado es determinista: siempre el mismo golpe seco
+
+
+def _frames_bait(grid: list[list[Cell]], rng, style: SafariItemAnimationStyle, fled: bool):
+    height = len(grid)
+    width = len(grid[0])
+    ground = height - 1
+    # El cebo cae a un lado, en el suelo: por eso el Pokémon tiene que acercarse.
+    pile_col = max(1, width // 2 - max(3, width // 6))
+
+    arc = _bezier_arc(6, height, width, ground, pile_col)
+    for index, (row, col) in enumerate(arc):
+        frame = _clone(grid)
+        if index:
+            previous_row, previous_col = arc[index - 1]
+            _put(frame, previous_row, previous_col, "·", style.spark)
+        _put(frame, row, col, style.glyph, style.light)
+        yield _grid_to_text(frame), 0.05
+
+    def with_pile(scene: list[list[Cell]], glyph: str = "▄"):
+        _put(scene, ground, pile_col - 1, "▂", style.light)
+        _put(scene, ground, pile_col, glyph, style.light)
+        _put(scene, ground, pile_col + 1, "▂", style.light)
+        return scene
+
+    yield _grid_to_text(with_pile(_clone(grid))), 0.16
+
+    # Se acerca al montón y lo picotea: cada bocado deja migas y baja el montón.
+    approach = width // 2 - pile_col
+    for step in (1, 2):
+        offset = -max(1, approach * step // 3)
+        yield _grid_to_text(with_pile(_shifted(grid, cols=offset))), 0.12
+
+    near = _shifted(grid, cols=-max(1, approach * 2 // 3))
+    for bite, glyph in enumerate(("▄", "▂", "▂")):
+        scene = with_pile(_shifted(near, rows=1 if bite % 2 else 0), glyph)
+        for column_offset in (-2, 2):
+            _put(scene, ground - 1, pile_col + column_offset, style.mark, style.mark_color)
+        yield _grid_to_text(scene), 0.16
+        yield _grid_to_text(with_pile(near, glyph)), 0.1
+
+    if fled:
+        yield from _frames_flee(near, style)
+        return
+
+    yield _grid_to_text(with_pile(near, "▂")), 0.4
+    del rng  # comer no depende del azar: el cebo siempre entretiene igual
+
+
+def _frames_item_fallback(style: SafariItemAnimationStyle, fled: bool):
+    """Animación mínima cuando no hay sprite que decorar."""
+
+    def canvas(lines):
+        return Text("\n".join(line.ljust(21) for line in (lines + [""] * 5)[:5]))
+
+    is_rock = style.action == "rock"
+    sequence = []
+    for column in range(0, 15, 3):
+        sequence.append((canvas(["", "", " " * column + style.glyph]), 0.06))
+    sequence.append((canvas(["", "", f"   ✺ {style.shout} ✺"]), 0.16))
+    if fled:
+        sequence.append((canvas(["", "", "   ¡ha huido! ", "   · · ·"]), 0.6))
+    elif is_rock:
+        sequence.append((canvas(["", "   #     #", "  ¡está enfadado!"]), 0.6))
+    else:
+        sequence.append((canvas(["", "   · · ·", "  está comiendo"]), 0.6))
+    return sequence
+
+
+def generate_safari_item_frames(
+    sprite_ansi: str | None,
+    *,
+    action: str,
+    fled: bool = False,
+    rng: random.Random | None = None,
+) -> list[tuple[Text, float]]:
+    """Generate rock/bait frames without terminal, subprocess, network or storage."""
+    random_source = rng or random
+    style = _item_style(action)
+    grid = _parse_sprite(sprite_ansi) if sprite_ansi else []
+    if not grid or not grid[0]:
+        return _frames_item_fallback(style, fled)
+    builder = _frames_rock if style.action == "rock" else _frames_bait
+    return list(builder(grid, random_source, style, fled))
+
+
+def play_safari_item_animation(
+    console: Console,
+    species: str,
+    form: str,
+    shiny: bool,
+    *,
+    action: str,
+    fled: bool = False,
+    rng: random.Random | None = None,
+    sprite_renderer: SpriteRenderer | None = None,
+) -> None:
+    """Lanza la roca o el cebo sobre el sprite real y deja el resultado a la vista.
+
+    Igual que la animación de captura, es decorativa: cualquier fallo se ignora
+    y el turno ya está guardado antes de llegar aquí.
+    """
+    if not console.is_terminal:
+        return
+    try:
+        sprite = sprite_renderer.capture_sprite(species, form, shiny) if sprite_renderer else None
+        frames = generate_safari_item_frames(sprite, action=action, fled=fled, rng=rng)
+        with Live(console=console, refresh_per_second=30, transient=True) as live:
+            for renderable, delay in frames:
+                live.update(Align.center(renderable))
+                time.sleep(delay)
+        # Si se ha largado no queda nada que mirar; si sigue ahí, se queda a la
+        # vista sin revelar el nombre: eso lo cuenta el mensaje del comando.
+        if not fled and sprite_renderer is not None:
+            sprite_renderer.render_sprite(species, form, shiny, show_title=False, info=False)
     except Exception:
         pass
 

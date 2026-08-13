@@ -68,6 +68,8 @@ def write_last_seen(species: str, form: str, shiny: bool, seen_at: str) -> None:
             "captured": False,
             "failed_capture_attempts": 0,
             "escape_after_attempts": None,
+            "catch_stage": 0,
+            "item_turns": 0,
         }
     )
 

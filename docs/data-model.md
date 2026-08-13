@@ -6,7 +6,7 @@ El archivo `${XDG_DATA_HOME:-$HOME/.local/share}/pokedex-cli/pokedex.db` es la
 | Área | Tablas | Invariantes principales |
 |---|---|---|
 | Colección | `captures`, `species_cache` | Identidad canónica; equipo máximo de seis |
-| Encuentro | `encounter_state` | Una sola criatura activa; intentos no negativos |
+| Encuentro | `encounter_state` | Una sola criatura activa; intentos no negativos; escalón de captura acotado |
 | Inventario | `inventory_balls` | Stock no negativo y máximos por bola |
 | Actividad | `activity_state`, `processed_commits` | Un estado global; cada commit se procesa una vez |
 | Evolución | columnas pendientes en `captures` | Conserva captura, nivel, EXP, shiny y equipo |
@@ -22,6 +22,10 @@ El archivo `${XDG_DATA_HOME:-$HOME/.local/share}/pokedex-cli/pokedex.db` es la
 - Los stats son los valores base compartidos por especie y forma. Cada captura
   mantiene identidad propia mediante ID, nivel, EXP, shiny, fecha y Pokéball;
   pueden coexistir duplicados para formas y evoluciones ramificadas.
+- El estado de Zona Safari vive en el encuentro: `catch_stage` multiplica la
+  probabilidad de captura y `item_turns` cuenta los turnos gastados en rocas y
+  cebos. Ambos comparten la paciencia (`escape_after_attempts`) con los
+  lanzamientos fallidos, así que huir es una sola regla y una sola transacción.
 
 `inventory.json` y `last_seen.json` solo son entradas históricas. Se importan
 una vez y se conservan para recuperación, no para escrituras activas.

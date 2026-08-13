@@ -16,6 +16,7 @@ from pokedex_cli.domain.individuality import (
     roll_nature,
 )
 from pokedex_cli.domain.progression import STARTING_LEVEL, experience_for_level
+from pokedex_cli.domain.safari import catch_stage_multiplier
 
 Inventory = dict[str, Any]
 Encounter = dict[str, Any]
@@ -94,6 +95,9 @@ class CaptureResult:
     capture_id: int | None = None
     attempts: int = 0
     escape_after: int = 0
+    # Turnos que le quedan al encuentro: la paciencia menos lo gastado en
+    # lanzamientos fallidos, rocas y cebos.
+    remaining_turns: int = 0
 
 
 class CaptureEncounter:
@@ -148,6 +152,7 @@ class CaptureEncounter:
                 shiny=bool(encounter["shiny"]),
                 ball_multiplier=command.ball_multiplier,
                 level=level,
+                mood_multiplier=catch_stage_multiplier(int(encounter.get("catch_stage") or 0)),
             )
             caught = self._random.random() < chance
             self._inventory_repository.save_in_transaction(connection, inventory)
@@ -181,7 +186,9 @@ class CaptureEncounter:
             if escape_after <= 0:
                 escape_after = self._escape_after_attempts(command, encounter)
             attempts = int(encounter.get("failed_capture_attempts") or 0) + 1
-            if attempts >= escape_after:
+            # Las rocas y los cebos ya han gastado turnos de la misma paciencia.
+            spent = attempts + max(0, int(encounter.get("item_turns") or 0))
+            if spent >= escape_after:
                 self._encounter_repository.clear_in_transaction(connection)
                 status = CaptureStatus.FLED
             else:
@@ -195,6 +202,7 @@ class CaptureEncounter:
                 chance=chance,
                 attempts=attempts,
                 escape_after=escape_after,
+                remaining_turns=max(0, escape_after - spent),
             )
         except BaseException:
             connection.rollback()

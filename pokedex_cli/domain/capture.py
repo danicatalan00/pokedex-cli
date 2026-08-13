@@ -15,6 +15,15 @@ class RandomFloat(Protocol):
     def random(self) -> float: ...
 
 
+def _validated_multiplier(value: float, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{name} must be a real number")
+    multiplier = float(value)
+    if not math.isfinite(multiplier) or multiplier < 0:
+        raise ValueError(f"{name} must be finite and non-negative")
+    return multiplier
+
+
 def catch_chance(
     capture_rate: int | None,
     is_legendary: bool = False,
@@ -22,14 +31,17 @@ def catch_chance(
     shiny: bool = False,
     ball_multiplier: float = 1.0,
     level: int = 5,
+    mood_multiplier: float = 1.0,
 ) -> float:
-    """Return a validated capture probability in the closed interval [0, 1]."""
+    """Return a validated capture probability in the closed interval [0, 1].
+
+    ``mood_multiplier`` carries the Safari state (rocks and bait). It is applied
+    after the Master Ball shortcut on purpose: that ball never fails, whatever
+    the Pokémon's mood.
+    """
     del shiny  # Reserved for an explicit future rule; it has no effect today.
-    if isinstance(ball_multiplier, bool) or not isinstance(ball_multiplier, (int, float)):
-        raise TypeError("ball_multiplier must be a real number")
-    multiplier = float(ball_multiplier)
-    if not math.isfinite(multiplier) or multiplier < 0:
-        raise ValueError("ball_multiplier must be finite and non-negative")
+    multiplier = _validated_multiplier(ball_multiplier, "ball_multiplier")
+    mood = _validated_multiplier(mood_multiplier, "mood_multiplier")
 
     if capture_rate is not None:
         if isinstance(capture_rate, bool) or not isinstance(capture_rate, int):
@@ -44,7 +56,7 @@ def catch_chance(
     else:
         base = capture_rate / 255
     level_factor = math.sqrt(5 / max(1, int(level)))
-    return max(0.0, min(1.0, base * multiplier * level_factor))
+    return max(0.0, min(1.0, base * multiplier * level_factor * mood))
 
 
 def escape_after_attempts(

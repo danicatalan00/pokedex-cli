@@ -53,3 +53,23 @@ def breakout_message(rng: random.Random | None = None) -> str:
             "¡Qué rabia! ¡Ha faltado muy poco!",
         )
     )
+
+
+def rock_message(rng: random.Random | None = None) -> str:
+    return (rng or random).choice(
+        (
+            "¡Has tirado una roca y le has dado de lleno!",
+            "¡La roca ha dado en el blanco!",
+            "¡Toma roca! No se lo esperaba.",
+        )
+    )
+
+
+def bait_message(rng: random.Random | None = None) -> str:
+    return (rng or random).choice(
+        (
+            "Has echado cebo cerca del Pokémon.",
+            "El cebo ha caído justo delante.",
+            "Le has lanzado un buen puñado de cebo.",
+        )
+    )

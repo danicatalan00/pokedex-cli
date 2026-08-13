@@ -49,8 +49,8 @@ def inventory_state(stock: int = 1) -> dict:
     }
 
 
-def encounter_state() -> dict:
-    return {
+def encounter_state(**overrides: object) -> dict:
+    state = {
         "species": "pikachu",
         "form": "regular",
         "shiny": False,
@@ -58,7 +58,11 @@ def encounter_state() -> dict:
         "captured": False,
         "failed_capture_attempts": 0,
         "escape_after_attempts": None,
+        "catch_stage": 0,
+        "item_turns": 0,
     }
+    state.update(overrides)
+    return state
 
 
 def normalise_inventory(raw: object | None) -> dict:
@@ -321,6 +325,73 @@ def test_failed_attempt_and_escape_are_committed_with_ball_consumption(
         inventory_repository.update(normalise_inventory, lambda state: None)["balls"]["ultraball"]
         == 0
     )
+
+
+@pytest.mark.parametrize(
+    ("catch_stage", "expected_rate_numerator"),
+    [(1, 60), (2, 120), (0, 30), (-1, 15)],
+)
+def test_the_safari_stage_scales_the_capture_chance(
+    tmp_path: Path, catch_stage: int, expected_rate_numerator: int
+) -> None:
+    """Cada roca dobla la probabilidad y cada cebo la divide: lo que el
+    encuentro guarda es lo que la tirada usa."""
+    use_case, inventory_repository, encounter_repository = build_use_case(tmp_path)
+    inventory_repository.update(normalise_inventory, lambda state: None)
+    encounter_repository.write(encounter_state(catch_stage=catch_stage))
+
+    result = use_case.execute(replace(command(), capture_rate=30, ball_multiplier=1.0))
+
+    assert result.chance == pytest.approx(expected_rate_numerator / 255)
+
+
+def test_the_master_ball_ignores_the_bait_penalty(tmp_path: Path) -> None:
+    use_case, inventory_repository, encounter_repository = build_use_case(
+        tmp_path, rng=FixedRandom(roll=0.999)
+    )
+    inventory_repository.update(
+        normalise_inventory, lambda state: state["balls"].update(masterball=1)
+    )
+    encounter_repository.write(encounter_state(catch_stage=-3))
+
+    result = use_case.execute(
+        replace(command(), ball_slug="masterball", ball_multiplier=255.0, capture_rate=3)
+    )
+
+    assert result.status is CaptureStatus.CAUGHT
+    assert result.chance == 1.0
+
+
+def test_turns_spent_on_items_count_towards_the_escape_threshold(tmp_path: Path) -> None:
+    use_case, inventory_repository, encounter_repository = build_use_case(
+        tmp_path, rng=FixedRandom(roll=0.99)
+    )
+    inventory_repository.update(normalise_inventory, lambda state: None)
+    # Paciencia 3 con dos turnos ya gastados en rocas: el lanzamiento fallido
+    # consume el último y se larga, aunque sea el primer fallo de bola.
+    encounter_repository.write(
+        encounter_state(escape_after_attempts=3, item_turns=2, catch_stage=2)
+    )
+
+    result = use_case.execute(replace(command(), capture_rate=1))
+
+    assert result.status is CaptureStatus.FLED
+    assert result.attempts == 1
+    assert result.remaining_turns == 0
+    assert encounter_repository.read() is None
+
+
+def test_a_failed_ball_reports_the_turns_the_encounter_still_has(tmp_path: Path) -> None:
+    use_case, inventory_repository, encounter_repository = build_use_case(
+        tmp_path, rng=FixedRandom(roll=0.99)
+    )
+    inventory_repository.update(normalise_inventory, lambda state: None)
+    encounter_repository.write(encounter_state(escape_after_attempts=5, item_turns=1))
+
+    result = use_case.execute(replace(command(), capture_rate=1))
+
+    assert result.status is CaptureStatus.FAILED
+    assert (result.attempts, result.escape_after, result.remaining_turns) == (1, 5, 3)
 
 
 def test_missing_encounter_and_empty_stock_do_not_mutate_state(tmp_path: Path) -> None:

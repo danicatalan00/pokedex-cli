@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from pokedex_cli.domain.identity import normalize_form, normalize_species
+from pokedex_cli.domain.safari import MAX_CATCH_STAGE, MIN_CATCH_STAGE
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,10 @@ class Encounter:
     captured: bool = False
     failed_capture_attempts: int = 0
     escape_after_attempts: int | None = None
+    # Estado de Zona Safari: escalón de captura (rocas y cebo) y turnos que
+    # esos ítems han consumido, aparte de los lanzamientos fallidos.
+    catch_stage: int = 0
+    item_turns: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -52,6 +57,8 @@ class Encounter:
             "captured": self.captured,
             "failed_capture_attempts": self.failed_capture_attempts,
             "escape_after_attempts": self.escape_after_attempts,
+            "catch_stage": self.catch_stage,
+            "item_turns": self.item_turns,
         }
 
     @classmethod
@@ -71,6 +78,8 @@ class Encounter:
             failed = max(0, int(raw.get("failed_capture_attempts") or 0))
             escape_raw = raw.get("escape_after_attempts")
             escape_after = int(escape_raw) if escape_raw is not None else None
+            item_turns = max(0, int(raw.get("item_turns") or 0))
+            stage = max(MIN_CATCH_STAGE, min(MAX_CATCH_STAGE, int(raw.get("catch_stage") or 0)))
         except (TypeError, ValueError):
             return None
         if escape_after is not None and escape_after <= 0:
@@ -79,7 +88,15 @@ class Encounter:
             pokemon = Pokemon(species, form, bool(raw.get("shiny", False)))
         except ValueError:
             return None
-        return cls(pokemon, seen_at, bool(raw.get("captured", False)), failed, escape_after)
+        return cls(
+            pokemon,
+            seen_at,
+            bool(raw.get("captured", False)),
+            failed,
+            escape_after,
+            stage,
+            item_turns,
+        )
 
 
 @dataclass(frozen=True)

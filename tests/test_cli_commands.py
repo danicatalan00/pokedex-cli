@@ -33,6 +33,11 @@ def sync_result():
     return inventory.SyncResult(state(), (), 0, 0)
 
 
+def _flat(rendered: str) -> str:
+    """Aplana el salto de línea que Rich mete al ajustar al ancho del terminal."""
+    return " ".join(rendered.split())
+
+
 @pytest.mark.parametrize(
     ("encounter", "expected_code", "text"),
     [
@@ -100,6 +105,211 @@ def test_ver_reports_pokedex_state_not_the_individual(
     assert expected in out
 
 
+def test_ver_tells_the_mood_in_words_and_never_the_numbers(monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli.composition,
+        "read_encounter",
+        lambda: seen(catch_stage=2, escape_after_attempts=4, item_turns=2),
+    )
+    _stub_status(monkeypatch, EncounterStatus(captured=False, special=False))
+
+    assert cli.cmd_ver(args()) == 0
+    out = capsys.readouterr().out
+    assert "está enfadado" in out
+    assert "paciencia" not in out
+    assert "×4" not in out
+
+
+def test_ver_debug_is_the_only_place_the_numbers_show_up(monkeypatch):
+    monkeypatch.setattr(
+        cli.composition,
+        "read_encounter",
+        lambda: seen(catch_stage=-1, escape_after_attempts=6, item_turns=1),
+    )
+    _stub_status(monkeypatch, EncounterStatus(captured=False, special=False))
+
+    with cli.console.capture() as output:
+        assert cli.cmd_ver(args(debug=True)) == 0
+
+    assert "captura ÷2 · paciencia 5/6" in _flat(output.get())
+
+
+def test_ver_says_nothing_about_the_safari_before_anyone_touches_the_encounter(monkeypatch, capsys):
+    monkeypatch.setattr(cli.composition, "read_encounter", lambda: seen())
+    _stub_status(monkeypatch, EncounterStatus(captured=False, special=False))
+
+    assert cli.cmd_ver(args()) == 0
+    assert "paciencia" not in capsys.readouterr().out
+
+
+def _stub_safari(monkeypatch, result, *, cache=None):
+    use_case = MagicMock()
+    use_case.execute.return_value = result
+    monkeypatch.setattr(cli.composition, "throw_safari_item", lambda: use_case)
+    species_data = MagicMock()
+    species_data.execute.return_value = cache
+    monkeypatch.setattr(cli, "_species_data_use_case", lambda: species_data)
+    monkeypatch.setattr(cli.animation, "play_safari_item_animation", MagicMock())
+    return use_case, species_data
+
+
+def safari_result(status, **overrides):
+    values = {
+        "action": cli.safari_rules.SafariAction.ROCK,
+        "catch_stage": 1,
+        "patience": 3,
+        "remaining_turns": 2,
+        "stage_delta": 1,
+        "patience_gained": 0,
+        "mood": cli.safari_rules.SafariMood.ANGRY,
+    }
+    values.update(overrides)
+    return cli.safari_application.SafariResult(status, **values)
+
+
+def bait_result(status, **overrides):
+    values = {
+        "action": cli.safari_rules.SafariAction.BAIT,
+        "catch_stage": -1,
+        "patience": 6,
+        "remaining_turns": 5,
+        "stage_delta": -1,
+        "patience_gained": 2,
+        "mood": cli.safari_rules.SafariMood.EATING,
+    }
+    values.update(overrides)
+    return safari_result(status, **values)
+
+
+@pytest.mark.parametrize(
+    ("encounter", "expected_code", "text"),
+    [
+        (None, 1, "No hay ningún Pokémon"),
+        (seen(captured=True), 0, "Ya capturaste"),
+    ],
+)
+def test_safari_items_short_circuit_without_spending_a_turn(
+    monkeypatch, capsys, encounter, expected_code, text
+):
+    monkeypatch.setattr(cli.composition, "read_encounter", lambda: encounter)
+    use_case, _ = _stub_safari(monkeypatch, safari_result(cli.safari_application.SafariStatus.FLED))
+
+    assert cli.cmd_roca(args()) == expected_code
+    assert text in capsys.readouterr().out
+    use_case.execute.assert_not_called()
+
+
+def test_rock_says_it_is_angry_without_leaking_any_number(monkeypatch):
+    monkeypatch.setattr(cli.composition, "read_encounter", lambda: seen(escape_after_attempts=4))
+    _stub_safari(monkeypatch, safari_result(cli.safari_application.SafariStatus.APPLIED))
+
+    with cli.console.capture() as output:
+        assert cli.cmd_roca(args()) == 0
+
+    rendered = _flat(output.get())
+    assert "está enfadado" in rendered
+    assert "paciencia" not in rendered
+    assert "×2" not in rendered
+
+
+def test_bait_says_it_is_eating_without_leaking_any_number(monkeypatch):
+    monkeypatch.setattr(cli.composition, "read_encounter", lambda: seen(escape_after_attempts=4))
+    _stub_safari(monkeypatch, bait_result(cli.safari_application.SafariStatus.APPLIED))
+
+    with cli.console.capture() as output:
+        assert cli.cmd_cebo(args()) == 0
+
+    rendered = _flat(output.get())
+    assert "está comiendo" in rendered
+    assert "paciencia" not in rendered
+
+
+def test_the_numbers_are_available_behind_debug(monkeypatch):
+    monkeypatch.setattr(cli.composition, "read_encounter", lambda: seen(escape_after_attempts=4))
+    _stub_safari(monkeypatch, bait_result(cli.safari_application.SafariStatus.APPLIED))
+
+    with cli.console.capture() as output:
+        assert cli.cmd_cebo(args(debug=True)) == 0
+
+    assert "captura ÷2 · paciencia 5/6" in _flat(output.get())
+
+
+def test_an_item_plays_its_own_animation(monkeypatch):
+    monkeypatch.setattr(cli.composition, "read_encounter", lambda: seen(escape_after_attempts=4))
+    _stub_safari(monkeypatch, safari_result(cli.safari_application.SafariStatus.FLED))
+    played = MagicMock()
+    monkeypatch.setattr(cli.animation, "play_safari_item_animation", played)
+
+    with cli.console.capture():
+        assert cli.cmd_roca(args()) == 0
+
+    assert played.call_args.kwargs["action"] == "rock"
+    assert played.call_args.kwargs["fled"] is True
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [("roca", "se ha enfadado y ha huido"), ("cebo", "se ha hartado del cebo y ha huido")],
+)
+def test_an_item_can_end_the_encounter(monkeypatch, command, expected):
+    monkeypatch.setattr(cli.composition, "read_encounter", lambda: seen(escape_after_attempts=2))
+    builder = safari_result if command == "roca" else bait_result
+    _stub_safari(monkeypatch, builder(cli.safari_application.SafariStatus.FLED))
+
+    with cli.console.capture() as output:
+        run = cli.cmd_roca if command == "roca" else cli.cmd_cebo
+        assert run(args()) == 0
+
+    assert expected in _flat(output.get())
+
+
+def test_a_saturated_item_says_it_is_being_ignored(monkeypatch):
+    monkeypatch.setattr(
+        cli.composition, "read_encounter", lambda: seen(escape_after_attempts=9, catch_stage=3)
+    )
+    _stub_safari(
+        monkeypatch,
+        safari_result(
+            cli.safari_application.SafariStatus.APPLIED,
+            catch_stage=3,
+            patience=9,
+            remaining_turns=4,
+            stage_delta=0,
+            patience_gained=0,
+        ),
+    )
+
+    with cli.console.capture() as output:
+        assert cli.cmd_roca(args()) == 0
+
+    assert "ya no aparta la vista de ti" in _flat(output.get())
+
+
+def test_an_item_only_looks_up_species_data_when_the_patience_is_not_set_yet(monkeypatch):
+    cache = {"capture_rate": 45, "spe": 100, "is_legendary": 0, "is_mythical": 0}
+    monkeypatch.setattr(cli.composition, "read_encounter", lambda: seen())
+    use_case, species_data = _stub_safari(
+        monkeypatch,
+        safari_result(cli.safari_application.SafariStatus.APPLIED),
+        cache=cache,
+    )
+
+    with cli.console.capture():
+        assert cli.cmd_roca(args()) == 0
+
+    species_data.execute.assert_called_once_with("pikachu", "regular")
+    command = use_case.execute.call_args.args[0]
+    assert (command.capture_rate, command.speed) == (45, 100)
+    assert command.action is cli.safari_rules.SafariAction.ROCK
+
+    # Con la paciencia ya fijada no hace falta consultar nada.
+    monkeypatch.setattr(cli.composition, "read_encounter", lambda: seen(escape_after_attempts=4))
+    species_data.execute.reset_mock()
+    with cli.console.capture():
+        assert cli.cmd_roca(args()) == 0
+    species_data.execute.assert_not_called()
+
+
 def test_ver_reports_when_nothing_is_waiting(monkeypatch, capsys):
     monkeypatch.setattr(cli.composition, "read_encounter", lambda: None)
     assert cli.cmd_ver(args()) == 1
@@ -150,6 +360,59 @@ def test_capture_maps_use_case_results_to_stable_cli_outcomes(
     assert animation.called is animated
 
 
+def _stub_capture(monkeypatch, result, *, encounter=None):
+    monkeypatch.setattr(cli.composition, "read_encounter", lambda: encounter or seen())
+    monkeypatch.setattr(cli, "_sync_training", lambda: (sync_result(), ()))
+    species_data = MagicMock()
+    species_data.execute.return_value = None
+    monkeypatch.setattr(cli, "_species_data_use_case", lambda: species_data)
+    use_case = MagicMock()
+    use_case.execute.return_value = result
+    monkeypatch.setattr(cli, "_capture_encounter_use_case", lambda: use_case)
+    monkeypatch.setattr(cli.animation, "play_capture_animation", MagicMock())
+
+
+def test_a_failed_ball_says_only_that_it_broke_out(monkeypatch):
+    """El fallo se cuenta como en el juego: ni cifras ni consejos de comandos."""
+    _stub_capture(
+        monkeypatch,
+        cli.capture_application.CaptureResult(
+            cli.capture_application.CaptureStatus.FAILED,
+            chance=0.2,
+            remaining_turns=2,
+            escape_after=4,
+        ),
+    )
+    monkeypatch.setattr(cli.capture, "breakout_message", lambda: "Se soltó")
+
+    with cli.console.capture() as output:
+        assert cli.cmd_capturar(args()) == 0
+
+    rendered = _flat(output.get())
+    assert rendered.strip() == "Se soltó"
+
+
+def test_debug_gathers_probability_mood_and_turns(monkeypatch):
+    _stub_capture(
+        monkeypatch,
+        cli.capture_application.CaptureResult(
+            cli.capture_application.CaptureStatus.FAILED,
+            chance=0.05,
+            remaining_turns=2,
+            escape_after=4,
+        ),
+        encounter=seen(catch_stage=-2),
+    )
+
+    with cli.console.capture() as output:
+        assert cli.cmd_capturar(args(debug=True)) == 0
+
+    rendered = _flat(output.get())
+    assert "probabilidad de captura: 5.0%" in rendered
+    assert "ánimo ÷4" in rendered
+    assert "turnos 2/4" in rendered
+
+
 def test_bag_info_reports_stock_policy_and_activity(monkeypatch):
     result = sync_result()
     result.inventory["activity"]["work_commits"] = 9
@@ -163,6 +426,10 @@ def test_bag_info_reports_stock_policy_and_activity(monkeypatch):
     assert "Información" in rendered
     assert "9 commits laborales" in rendered
     assert "faltan 1 commit" in rendered
+    # La Zona Safari se explica donde el jugador consulta sus recursos.
+    assert "Zona Safari" in rendered
+    assert "pokedex roca" in rendered
+    assert "pokedex cebo" in rendered
 
 
 @pytest.fixture
@@ -265,6 +532,7 @@ def test_team_remove_and_show_delegate_to_use_case_and_presentation(connection, 
                 generations="1-9",
                 bola="poke",
                 result="catch",
+                accion="bola",
             ),
             "eevee",
             True,
@@ -278,6 +546,7 @@ def test_team_remove_and_show_delegate_to_use_case_and_presentation(connection, 
                 generations="1-9",
                 bola="ultra",
                 result="escape",
+                accion="bola",
             ),
             "mewtwo",
             False,
@@ -292,6 +561,43 @@ def test_capture_demo_is_pure_presentation(monkeypatch, namespace, species, caug
     assert cli.cmd_demo(namespace) == 0
     assert animation.call_args.args[1] == species
     assert animation.call_args.args[4] is caught
+
+
+@pytest.mark.parametrize(
+    ("accion", "result", "expected_action", "expected_fled", "expected_text"),
+    [
+        ("roca", "random", "rock", False, "está enfadado"),
+        ("cebo", "random", "bait", False, "está comiendo"),
+        ("roca", "escape", "rock", True, "se ha enfadado y ha huido"),
+    ],
+)
+def test_safari_demo_plays_the_item_animation_without_touching_state(
+    monkeypatch, accion, result, expected_action, expected_fled, expected_text
+):
+    played = MagicMock()
+    monkeypatch.setattr(cli.animation, "play_safari_item_animation", played)
+    capture_animation = MagicMock()
+    monkeypatch.setattr(cli.animation, "play_capture_animation", capture_animation)
+    namespace = argparse.Namespace(
+        nombre="eevee",
+        legendary=False,
+        form="regular",
+        shiny=False,
+        generations="1-9",
+        bola="poke",
+        result=result,
+        accion=accion,
+    )
+
+    with cli.console.capture() as output:
+        assert cli.cmd_demo(namespace) == 0
+
+    assert played.call_args.kwargs["action"] == expected_action
+    assert played.call_args.kwargs["fled"] is expected_fled
+    capture_animation.assert_not_called()
+    rendered = _flat(output.get())
+    assert expected_text in rendered
+    assert "no se guarda nada" in rendered
 
 
 def test_evolution_demo_delegates_without_persistence(monkeypatch):

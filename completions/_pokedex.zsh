@@ -27,6 +27,8 @@ _pokedex() {
   commands=(
     'ver:muestra qué Pokémon está esperando'
     'capturar:intenta capturar el Pokémon que espera'
+    'roca:tírale una roca: más captura, menos paciencia'
+    'cebo:échale cebo: más turnos, menos captura'
     'bolsas:muestra y actualiza tus Pokeballs'
     'list:lista tus capturas'
     'search:ficha de cualquier Pokémon o forma'
@@ -58,6 +60,10 @@ _pokedex() {
             '(-b --bola)'{-b,--bola}'[elige la Pokeball sin menú]:bola:(poke super ultra master)' \
             '--debug[muestra la probabilidad exacta de captura]'
           ;;
+        roca|piedra|cebo|caramelo|ver)
+          _arguments \
+            '--debug[muestra las cifras internas del encuentro]'
+          ;;
         bolsas)
           _arguments \
             '--info[muestra efectividad, límites y reglas de reposición]'
@@ -80,6 +86,7 @@ _pokedex() {
             '(-g --generations)'{-g,--generations}'[generaciones para el azar]:gens:' \
             '(-r --result)'{-r,--result}'[fuerza el resultado]:resultado:(random catch escape)' \
             '(-b --bola)'{-b,--bola}'[animación de Pokeball]:bola:(poke super ultra master)' \
+            '(-a --accion)'{-a,--accion}'[qué lanzar]:acción:(bola roca cebo)' \
             '1:Pokémon:_pokedex_pokemon_names'
           ;;
         demo-vision)

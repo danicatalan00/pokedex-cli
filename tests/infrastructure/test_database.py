@@ -70,6 +70,7 @@ def test_every_recorded_historical_schema_upgrades_without_losing_captures(
             "ability",
         }
         assert "encounter_level" in database._columns(upgraded, "species_cache")
+        assert database._columns(upgraded, "encounter_state") >= {"catch_stage", "item_turns"}
         assert database._columns(upgraded, "species_cache") >= {
             "height_dm",
             "weight_hg",
@@ -326,3 +327,30 @@ def test_migration_009_registers_dex_caught_including_evolved_captures(
         assert connection.execute("SELECT COUNT(*) FROM dex_caught").fetchone()[0] == 2
     finally:
         connection.close()
+
+
+def test_migration_012_starts_an_existing_encounter_neutral_and_bounds_the_stage(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "safari.db"
+    old = sqlite3.connect(path)
+    database.migrate(old, database.MIGRATIONS[:11])
+    old.execute(
+        "INSERT INTO encounter_state (singleton, species, form, shiny, seen_at, "
+        "captured, failed_capture_attempts) VALUES (1, 'pikachu', 'regular', 0, 'then', 0, 2)"
+    )
+    old.commit()
+    old.close()
+
+    upgraded = database.connect(path)
+    try:
+        row = upgraded.execute(
+            "SELECT failed_capture_attempts, catch_stage, item_turns FROM encounter_state"
+        ).fetchone()
+        assert (row["failed_capture_attempts"], row["catch_stage"], row["item_turns"]) == (2, 0, 0)
+        with pytest.raises(sqlite3.IntegrityError):
+            upgraded.execute("UPDATE encounter_state SET catch_stage = 4")
+        with pytest.raises(sqlite3.IntegrityError):
+            upgraded.execute("UPDATE encounter_state SET item_turns = -1")
+    finally:
+        upgraded.close()

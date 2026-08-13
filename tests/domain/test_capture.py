@@ -51,6 +51,33 @@ def test_invalid_multipliers_are_rejected(multiplier: object, error: type[Except
         catch_chance(100, ball_multiplier=multiplier)
 
 
+@pytest.mark.parametrize(
+    ("multiplier", "error"),
+    [
+        (-1.0, ValueError),
+        (math.inf, ValueError),
+        (math.nan, ValueError),
+        (True, TypeError),
+        ("2", TypeError),
+        (None, TypeError),
+    ],
+)
+def test_invalid_mood_multipliers_are_rejected(multiplier: object, error: type[Exception]) -> None:
+    with pytest.raises(error, match="mood_multiplier"):
+        catch_chance(100, mood_multiplier=multiplier)
+
+
+def test_mood_multiplier_scales_the_probability_but_not_the_masterball() -> None:
+    """Rocas y cebos entran como un factor más, salvo en la Masterball: esa
+    nunca falla, así que se resuelve antes de mirar el ánimo."""
+    assert catch_chance(30, mood_multiplier=2.0) == pytest.approx(60 / 255)
+    assert catch_chance(30, mood_multiplier=0.5) == pytest.approx(15 / 255)
+    assert catch_chance(30, mood_multiplier=0.0) == 0.0
+    assert catch_chance(200, mood_multiplier=2.0) == 1.0
+    assert catch_chance(1, ball_multiplier=255, mood_multiplier=0.125) == 1.0
+    assert catch_chance(100) == catch_chance(100, mood_multiplier=1.0)
+
+
 def test_masterball_sentinel_and_upper_clamp() -> None:
     assert catch_chance(1, ball_multiplier=255) == 1.0
     assert catch_chance(1, ball_multiplier=254.999) == pytest.approx(254.999 / 255)

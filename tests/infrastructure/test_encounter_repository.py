@@ -25,7 +25,8 @@ def test_legacy_encounter_imports_once_and_clear_does_not_resurrect_it(
     legacy_path.write_text(json.dumps(encounter()))
     repository = SQLiteEncounterRepository(tmp_path / "pokedex.db", legacy_path)
 
-    assert repository.read() == encounter()
+    # El estado de Zona Safari no existía en el JSON histórico: entra neutro.
+    assert repository.read() == {**encounter(), "catch_stage": 0, "item_turns": 0}
     repository.clear()
     assert repository.read() is None
     assert legacy_path.exists()
@@ -58,6 +59,23 @@ def test_twenty_concurrent_updates_preserve_every_failed_attempt(tmp_path: Path)
     assert final is not None
     assert final["failed_capture_attempts"] == 20
     assert final["escape_after_attempts"] == 25
+
+
+def test_safari_state_survives_a_round_trip_through_sqlite(tmp_path: Path) -> None:
+    repository = SQLiteEncounterRepository(tmp_path / "pokedex.db", tmp_path / "last_seen.json")
+    repository.write(encounter())
+
+    def anger_it(state: dict | None) -> None:
+        assert state is not None
+        state["catch_stage"] = 2
+        state["item_turns"] = 3
+        state["escape_after_attempts"] = 5
+
+    repository.update(anger_it)
+
+    stored = repository.read()
+    assert stored is not None
+    assert (stored["catch_stage"], stored["item_turns"]) == (2, 3)
 
 
 def test_write_records_a_sighting_in_the_same_transaction(tmp_path: Path) -> None:

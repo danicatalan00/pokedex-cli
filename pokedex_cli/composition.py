@@ -16,6 +16,7 @@ from pokedex_cli.application import evolutions as evolution_application
 from pokedex_cli.application import hook as hook_application
 from pokedex_cli.application import individuality as individuality_application
 from pokedex_cli.application import pokedex_catalog as pokedex_catalog_application
+from pokedex_cli.application import safari as safari_application
 from pokedex_cli.application import species as species_application
 from pokedex_cli.application import team as team_application
 from pokedex_cli.application import training as training_application
@@ -72,6 +73,14 @@ def capture_encounter() -> capture_application.CaptureEncounter:
         inventory_normaliser=lambda raw: inventory._normalise_inventory(
             raw, datetime.now(timezone.utc)
         ),
+        random_source=random,
+    )
+
+
+def throw_safari_item() -> safari_application.ThrowSafariItem:
+    return safari_application.ThrowSafariItem(
+        connection_factory=lambda: database.connect(paths.DB_PATH),
+        encounter_repository=SQLiteEncounterRepository(paths.DB_PATH, paths.LAST_SEEN_PATH),
         random_source=random,
     )
 

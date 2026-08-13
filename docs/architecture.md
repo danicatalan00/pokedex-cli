@@ -20,8 +20,10 @@ presentation ──→ application ──→ domain
 
 El hook abre un caso de uso que procesa actividad y evoluciones antes de pedir
 un encuentro al adaptador de Krabby. Capturar consume inventario, resuelve el
-intento y persiste el resultado dentro de una única transacción. La presentación
-solo traduce entrada/salida.
+intento y persiste el resultado dentro de una única transacción. Las acciones de
+Zona Safari (roca y cebo) son turnos del mismo encuentro: gastan la misma
+paciencia y se resuelven en su propia transacción atómica. La presentación solo
+traduce entrada/salida.
 
 ## Decisiones que protegen el diseño
 

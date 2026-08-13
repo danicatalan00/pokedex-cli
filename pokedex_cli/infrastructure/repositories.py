@@ -243,6 +243,8 @@ class SQLiteEncounterRepository:
             "captured": bool(row["captured"]),
             "failed_capture_attempts": int(row["failed_capture_attempts"]),
             "escape_after_attempts": row["escape_after_attempts"],
+            "catch_stage": int(row["catch_stage"]),
+            "item_turns": int(row["item_turns"]),
         }
 
     @staticmethod
@@ -251,8 +253,9 @@ class SQLiteEncounterRepository:
             """
             INSERT INTO encounter_state (
                 singleton, species, form, shiny, seen_at, captured,
-                failed_capture_attempts, escape_after_attempts
-            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+                failed_capture_attempts, escape_after_attempts,
+                catch_stage, item_turns
+            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(singleton) DO UPDATE SET
                 species = excluded.species,
                 form = excluded.form,
@@ -260,7 +263,9 @@ class SQLiteEncounterRepository:
                 seen_at = excluded.seen_at,
                 captured = excluded.captured,
                 failed_capture_attempts = excluded.failed_capture_attempts,
-                escape_after_attempts = excluded.escape_after_attempts
+                escape_after_attempts = excluded.escape_after_attempts,
+                catch_stage = excluded.catch_stage,
+                item_turns = excluded.item_turns
             """,
             (
                 state["species"],
@@ -270,6 +275,8 @@ class SQLiteEncounterRepository:
                 int(bool(state["captured"])),
                 int(state["failed_capture_attempts"]),
                 state["escape_after_attempts"],
+                int(state.get("catch_stage") or 0),
+                int(state.get("item_turns") or 0),
             ),
         )
 

@@ -61,7 +61,12 @@ class LastSeenConcurrencyTests(unittest.TestCase):
                 patch.object(paths, "DB_PATH", database_path),
                 patch.object(paths, "LAST_SEEN_PATH", legacy_path),
             ):
-                self.assertEqual(paths.read_last_seen(), initial)
+                # El encuentro histórico no conocía la Zona Safari: se importa
+                # con el ánimo neutro y sin turnos gastados en ítems.
+                self.assertEqual(
+                    paths.read_last_seen(),
+                    {**initial, "catch_stage": 0, "item_turns": 0},
+                )
                 paths.mark_last_seen_captured()
                 self.assertTrue(paths.read_last_seen()["captured"])
 

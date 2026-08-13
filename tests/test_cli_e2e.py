@@ -14,6 +14,8 @@ SUBCOMMANDS = [
     "hook",
     "ver",
     "capturar",
+    "roca",
+    "cebo",
     "bolsas",
     "list",
     "search",
@@ -259,6 +261,76 @@ def test_offline_capture_success_and_failure_are_persisted_atomically(tmp_path: 
         assert check.execute("SELECT COUNT(*) FROM captures").fetchone()[0] == 0
     finally:
         check.close()
+
+
+def test_safari_items_change_the_encounter_and_eventually_end_it(tmp_path: Path) -> None:
+    """Un encuentro completo de Zona Safari sin red: la roca sube la captura y
+    gasta paciencia, el cebo la devuelve, y las rocas acaban espantándolo."""
+    environment = isolated_environment(tmp_path)
+    connection = database.connect(database_path(environment))
+    try:
+        cache_species(connection, "pikachu")
+        set_encounter(connection, "pikachu", escape_after=4)
+    finally:
+        connection.close()
+
+    rock = run_cli(environment, "roca")
+    assert rock.returncode == 0
+    assert "enfadado" in rock.stdout
+    assert "Traceback" not in rock.stderr
+
+    check = database.connect(database_path(environment))
+    try:
+        state = check.execute("SELECT * FROM encounter_state").fetchone()
+        assert (state["catch_stage"], state["item_turns"], state["escape_after_attempts"]) == (
+            1,
+            1,
+            3,
+        )
+        # Un ítem no gasta lanzamientos: la Pokeball sigue intacta.
+        assert state["failed_capture_attempts"] == 0
+    finally:
+        check.close()
+
+    # El jugador ve palabras; las cifras solo aparecen si las pide.
+    seen = run_cli(environment, "ver")
+    assert seen.returncode == 0
+    assert "está enfadado" in seen.stdout
+    assert "paciencia" not in seen.stdout
+
+    debug = run_cli(environment, "ver", "--debug")
+    assert debug.returncode == 0
+    assert "captura ×2 · paciencia 2/3" in " ".join(debug.stdout.split())
+
+    bait = run_cli(environment, "cebo")
+    assert bait.returncode == 0
+    assert "comiendo" in bait.stdout
+    check = database.connect(database_path(environment))
+    try:
+        state = check.execute("SELECT * FROM encounter_state").fetchone()
+        assert (state["catch_stage"], state["item_turns"], state["escape_after_attempts"]) == (
+            0,
+            2,
+            5,
+        )
+    finally:
+        check.close()
+
+    # Cada roca cuesta dos turnos de paciencia (el que gasta y el que le quita),
+    # así que desde 5 con 2 gastados la segunda lo espanta.
+    first, second = run_cli(environment, "roca"), run_cli(environment, "roca")
+    assert (first.returncode, second.returncode) == (0, 0)
+    assert "ha huido" not in first.stdout
+    assert "se ha enfadado y ha huido" in second.stdout
+    check = database.connect(database_path(environment))
+    try:
+        assert check.execute("SELECT COUNT(*) FROM encounter_state").fetchone()[0] == 0
+    finally:
+        check.close()
+
+    gone = run_cli(environment, "roca")
+    assert gone.returncode == 1
+    assert "No hay ningún Pokémon" in gone.stdout
 
 
 def test_populated_read_commands_and_team_work_without_network(tmp_path: Path) -> None:
