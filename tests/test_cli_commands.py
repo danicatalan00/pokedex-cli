@@ -61,6 +61,9 @@ def _stub_status(monkeypatch, status):
     use_case = MagicMock()
     use_case.execute.return_value = status
     monkeypatch.setattr(cli.composition, "describe_encounter", lambda: use_case)
+    renderer = MagicMock()
+    renderer.capture_sprite.return_value = None
+    monkeypatch.setattr(cli, "_sprite_renderer", lambda: renderer)
     return use_case
 
 
@@ -103,6 +106,21 @@ def test_ver_reports_pokedex_state_not_the_individual(
     assert cli.cmd_ver(args()) == 0
     out = capsys.readouterr().out
     assert expected in out
+
+
+def test_ver_renders_the_current_encounter_sprite(monkeypatch):
+    encounter = seen(species="raichu", form="alola", shiny=True)
+    monkeypatch.setattr(cli.composition, "read_encounter", lambda: encounter)
+    _stub_status(monkeypatch, EncounterStatus(captured=False, special=True))
+    renderer = MagicMock()
+    renderer.capture_sprite.return_value = "SPRITE"
+    monkeypatch.setattr(cli, "_sprite_renderer", lambda: renderer)
+
+    with cli.console.capture() as output:
+        assert cli.cmd_ver(args()) == 0
+
+    renderer.capture_sprite.assert_called_once_with("raichu", "alola", True)
+    assert "SPRITE" in output.get()
 
 
 def test_ver_tells_the_mood_in_words_and_never_the_numbers(monkeypatch, capsys):

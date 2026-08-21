@@ -11,6 +11,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.live import Live
 from rich.table import Table
+from rich.text import Text
 
 from pokedex_cli import (
     animation,
@@ -84,6 +85,11 @@ def cmd_ver(args: argparse.Namespace) -> int:
     if last_seen is None:
         print("No hay ningún Pokémon a la vista. Abre una terminal nueva primero.")
         return 1
+    sprite = _sprite_renderer().capture_sprite(
+        last_seen["species"], last_seen["form"], last_seen["shiny"]
+    )
+    if sprite:
+        console.print(Text.from_ansi(sprite))
     name = _display_name(last_seen["species"], last_seen["form"])
     if last_seen["shiny"]:
         name += " ✨shiny✨"
