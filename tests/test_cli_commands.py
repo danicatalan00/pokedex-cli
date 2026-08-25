@@ -634,18 +634,22 @@ def test_evolution_demo_delegates_without_persistence(monkeypatch):
     assert animation.call_args.kwargs["speed"] == 0.7
 
 
-def test_completion_reads_project_file_then_reports_missing(monkeypatch, tmp_path, capsys):
-    completion = tmp_path / "completions" / "_pokedex.zsh"
+@pytest.mark.parametrize(("shell", "filename"), [("bash", "pokedex.bash"), ("zsh", "_pokedex.zsh")])
+def test_completion_reads_project_file_then_reports_missing(
+    monkeypatch, tmp_path, capsys, shell, filename
+):
+    completion = tmp_path / "completions" / filename
     completion.parent.mkdir()
     completion.write_text("# completion")
     monkeypatch.setattr(cli.composition.paths, "PROJECT_DIR", tmp_path)
 
-    assert cli.cmd_completion(argparse.Namespace(shell="zsh")) == 0
+    assert cli.cmd_completion(argparse.Namespace(shell=shell)) == 0
     assert capsys.readouterr().out == "# completion"
 
     completion.unlink()
-    monkeypatch.setattr(cli.Path, "home", lambda: tmp_path / "missing-home")
-    assert cli.cmd_completion(argparse.Namespace(shell="zsh")) == 1
+    monkeypatch.setenv("HOME", str(tmp_path / "missing-home"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "missing-data"))
+    assert cli.cmd_completion(argparse.Namespace(shell=shell)) == 1
     assert "No hay autocompletado" in capsys.readouterr().err
 
 

@@ -6,7 +6,6 @@ import sys
 import termios
 import tty
 from datetime import datetime, timezone
-from pathlib import Path
 
 from rich.console import Console
 from rich.live import Live
@@ -917,12 +916,9 @@ def cmd_demo_evolucion(args: argparse.Namespace) -> int:
 
 def cmd_completion(args: argparse.Namespace) -> int:
     """Imprime el script de autocompletado para el shell indicado."""
-    completion_file = composition.completion_file(args.shell)
-    if not completion_file.exists():
-        completion_file = Path.home() / ".zfunc" / "_pokedex"
     try:
-        sys.stdout.write(completion_file.read_text())
-    except FileNotFoundError:
+        sys.stdout.write(composition.completion_file(args.shell).read_text())
+    except OSError:
         print(f"No hay autocompletado disponible para '{args.shell}'.", file=sys.stderr)
         return 1
     return 0
@@ -968,7 +964,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  pokedex demo -a roca            prueba la animación de la roca\n"
             "  pokedex demo -L                 pruébala contra un legendario al azar\n"
             "  pokedex demo-evolucion bulbasaur ivysaur  prueba una evolución\n"
-            "\nAutocompletado zsh:  pokedex completion zsh > ~/.zfunc/_pokedex"
+            "\nAutocompletado:  pokedex completion bash  ·  pokedex completion zsh"
         ),
     )
     subparsers = parser.add_subparsers(dest="command", metavar="<comando>", required=True)
@@ -976,8 +972,8 @@ def build_parser() -> argparse.ArgumentParser:
     hook_parser = subparsers.add_parser(
         "hook",
         help="(interno) pinta un Pokémon y recuerda cuál fue",
-        description="Uso interno desde ~/.zshrc: pinta un Pokémon al azar y guarda "
-        "en silencio cuál fue, para poder capturarlo luego.",
+        description="Uso interno desde ~/.bashrc o ~/.zshrc: pinta un Pokémon al azar y "
+        "guarda en silencio cuál fue, para poder capturarlo luego.",
     )
     hook_parser.add_argument(
         "generations",
@@ -1271,12 +1267,14 @@ def build_parser() -> argparse.ArgumentParser:
     completion_parser = subparsers.add_parser(
         "completion",
         help="imprime el script de autocompletado del shell",
-        description="Imprime por stdout el script de autocompletado. Para zsh:\n"
-        "  pokedex completion zsh > ~/.zfunc/_pokedex\n"
-        "y asegúrate de tener ~/.zfunc en tu fpath antes de compinit.",
+        description="Imprime por stdout el script de autocompletado.\n\n"
+        "  bash:  pokedex completion bash > \\\n"
+        '           "${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/pokedex"\n'
+        "  zsh:   pokedex completion zsh > ~/.zfunc/_pokedex\n\n"
+        "En zsh, ~/.zfunc debe estar en el fpath antes de compinit.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    completion_parser.add_argument("shell", choices=["zsh"], help="shell objetivo")
+    completion_parser.add_argument("shell", choices=["bash", "zsh"], help="shell objetivo")
     completion_parser.set_defaults(func=cmd_completion)
 
     return parser

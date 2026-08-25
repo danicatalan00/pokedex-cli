@@ -187,7 +187,7 @@ def run_wild_encounter(generations: str, write_last_seen: Callable[[str, str, bo
 
 
 def completion_file(shell: str) -> Path:
-    return paths.PROJECT_DIR / "completions" / f"_pokedex.{shell}"
+    return paths.completion_file(shell)
 
 
 def record_failure(context: str, error: BaseException) -> None:

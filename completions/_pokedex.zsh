@@ -1,5 +1,5 @@
 #compdef pokedex
-# Autocompletado zsh para pokedex-cli.
+# Autocompletado zsh para pokedex-cli. El equivalente bash es pokedex.bash.
 # Instalación:
 #   pokedex completion zsh > ~/.zfunc/_pokedex
 #   # y en ~/.zshrc, antes de `compinit`:
@@ -72,6 +72,10 @@ _pokedex() {
           _arguments \
             '(-L --legendarios --legendary)'{-L,--legendarios,--legendary}'[solo legendarios y singulares]'
           ;;
+        ranking)
+          _arguments \
+            '--equipo[restringe el ranking a tu equipo]'
+          ;;
         search)
           _arguments \
             '(-f --form)'{-f,--form}'[forma alternativa]:forma:' \
@@ -123,7 +127,7 @@ _pokedex() {
           _message 'generaciones (p.ej. 1-3 o 1,3,6)'
           ;;
         completion)
-          _values 'shell' 'zsh'
+          _values 'shell' 'bash' 'zsh'
           ;;
       esac
       ;;

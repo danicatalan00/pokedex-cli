@@ -10,6 +10,7 @@ from pokedex_cli.infrastructure.repositories import SQLiteEncounterRepository
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local/share")) / "pokedex-cli"
+COMPLETION_FILENAMES = {"bash": "pokedex.bash", "zsh": "_pokedex.zsh"}
 DB_PATH = DATA_DIR / "pokedex.db"
 LAST_SEEN_PATH = DATA_DIR / "last_seen.json"
 KRABBY_POKEMON_JSON = DATA_DIR / "krabby_pokemon.json"
@@ -18,6 +19,22 @@ INVENTORY_PATH = DATA_DIR / "inventory.json"
 
 def ensure_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def installed_completion_file(shell: str) -> Path:
+    """Where install.sh leaves each completion script once the checkout is gone."""
+    if shell == "bash":
+        data_home = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local/share"))
+        return data_home / "bash-completion" / "completions" / "pokedex"
+    return Path.home() / ".zfunc" / "_pokedex"
+
+
+def completion_file(shell: str) -> Path:
+    """Prefer the checkout copy; fall back to whatever install.sh already wrote."""
+    project_file = PROJECT_DIR / "completions" / COMPLETION_FILENAMES[shell]
+    if project_file.exists():
+        return project_file
+    return installed_completion_file(shell)
 
 
 def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
