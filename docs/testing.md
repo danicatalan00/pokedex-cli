@@ -17,6 +17,8 @@ test nuevo debe conservar esas fronteras.
 - **Infraestructura:** contratos contra SQLite, procesos o transportes reales
   temporales.
 - **CLI/E2E:** comportamiento observable mediante `python -m pokedex_cli`.
+- **Shell:** los completados se ejecutan en un bash o zsh reales, con órdenes
+  falsas en `PATH` en lugar de krabby o del propio `pokedex`.
 - **Install/stress:** empaquetamiento y concurrencia; se ejecutan por separado.
 
 Prefiere el test más bajo que pueda demostrar el riesgo. Usa Hypothesis para

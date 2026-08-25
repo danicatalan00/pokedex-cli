@@ -25,6 +25,7 @@ paso de instalación final.
 | SQLite, migración o concurrencia | Tests de infraestructura y `stress` |
 | CLI, hook o fallback | E2E y prueba degradada del hook |
 | Instalador, shim o completado | Marker `install` en `HOME` temporal |
+| Completado de bash o zsh | `tests/test_completions.py` en los dos shells |
 | Reglas críticas | Mutation testing antes de integrar |
 
 Suite normal:
@@ -42,7 +43,8 @@ un commit a otra persona:
 ```bash
 ./install.sh
 (cd /tmp && "$HOME/bin/pokedex" --help >/dev/null)
-zsh -n "$HOME/.zshrc"
+bash -n "$HOME/.bashrc"
+zsh -n "$HOME/.zshrc"   # solo si el usuario tiene zsh configurado
 ```
 
 Esto construye una instalación estable en `site-packages`; la siguiente

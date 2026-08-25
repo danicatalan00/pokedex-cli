@@ -20,7 +20,8 @@ El estado vive en SQLite, los datos de especies se enriquecen con
 
 ## Inicio rápido
 
-Requiere Python 3.11–3.13, Zsh, `rich`, `requests` y Krabby para los sprites.
+Requiere Python 3.11–3.13, Bash o Zsh, `rich`, `requests` y Krabby para los
+sprites.
 
 ```bash
 ./install.sh
@@ -28,8 +29,9 @@ pokedex --help
 ```
 
 El instalador crea una copia estable en el directorio XDG, un shim en
-`~/bin/pokedex` y el completado de Zsh. La activación del encuentro al abrir una
-terminal está explicada en la [guía de instalación](docs/installation.md).
+`~/bin/pokedex` y el completado de Bash y de Zsh. La activación del encuentro al
+abrir una terminal está explicada en la
+[guía de instalación](docs/installation.md).
 
 ## Inicio más rápido
 

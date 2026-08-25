@@ -20,7 +20,11 @@ Una instalación correcta deja:
 - el estado SQLite, que debe conservarse en una actualización, bajo el mismo
   directorio de datos;
 - el ejecutable `~/bin/pokedex`;
-- el completado en `~/.zfunc/_pokedex` y su configuración en `~/.zshrc`;
+- el completado de Bash en
+  `${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/pokedex` y su
+  carga en `~/.bashrc`;
+- el completado de Zsh en `~/.zfunc/_pokedex` y su configuración en `~/.zshrc`
+  (solo si ya existe ese archivo);
 - opcionalmente, Krabby en `PATH` para mostrar sprites y encuentros.
 
 El checkout no forma parte de la instalación efectiva. Puede moverse o
@@ -31,8 +35,8 @@ eliminarse después de instalar sin romper `pokedex`.
 1. No uses `sudo`, no cambies el shell por defecto y no instales software global
    sin aprobación explícita.
 2. Detecta si se trata de una primera instalación o de una actualización. No
-   borres el entorno estable, `pokedex.db`, una `.zshrc` existente ni otro estado
-   del usuario para «empezar limpio».
+   borres el entorno estable, `pokedex.db`, un `.bashrc` o `.zshrc` existentes ni
+   otro estado del usuario para «empezar limpio».
 3. Inspecciona versiones, rutas, permisos, distribución y gestor de paquetes.
    Comprueba con el mismo `python3` que invocará `install.sh`.
 4. Ejecuta directamente todas las acciones reversibles que no necesiten
@@ -80,15 +84,18 @@ su ruta efectiva antes de actualizar:
 (cd /tmp && "$HOME/bin/pokedex" --help >/dev/null)
 ```
 
-La ausencia de Zsh impide validar su completado, pero no la CLI. La ausencia de
-Krabby permite instalar y usar las funciones que no requieren sprites; debe
-presentarse como una mejora opcional, no como un fallo de instalación.
+La CLI, el completado y el hook funcionan igual en Bash y en Zsh: la ausencia de
+uno de los dos shells solo impide validar su lado, nunca la instalación. La
+ausencia de Krabby permite instalar y usar las funciones que no requieren
+sprites; debe presentarse como una mejora opcional, no como un fallo de
+instalación.
 
 ## Resolver requisitos
 
-Requisitos base: Linux/WSL, Bash, Python 3.11–3.13 con `venv`, y `rich`
-13.7–15 y `requests` 2.x importables por el Python del sistema. Zsh es necesario
-para el completado y el hook documentados.
+Requisitos base: Linux/WSL, Bash 4 o superior, Python 3.11–3.13 con `venv`, y
+`rich` 13.7–15 y `requests` 2.x importables por el Python del sistema. Zsh solo
+hace falta si es el shell del usuario: el completado y el hook están escritos
+para los dos.
 
 Antes de pedir `sudo`, detecta la distribución (`/etc/os-release`) y las
 herramientas disponibles. En Debian, Ubuntu o WSL basado en ellas, un bloque
@@ -96,7 +103,9 @@ habitual es:
 
 ```bash
 sudo apt update
-sudo apt install -y python3 python3-venv python3-rich python3-requests zsh
+sudo apt install -y python3 python3-venv python3-rich python3-requests
+# y, solo si el usuario usa zsh:
+sudo apt install -y zsh
 ```
 
 No pidas instalar todo el bloque si solo falta una pieza. En otra distribución,
@@ -128,23 +137,27 @@ chmod +x install.sh
 
 El script crea una wheel e instala/actualiza una copia estable con
 `--system-site-packages`; no crea una `.venv` dentro del proyecto. También crea
-el shim, actualiza el completado, integra `~/.zfunc` en Zsh de forma idempotente
-e invalida dumps antiguos de completado.
+el shim, actualiza los dos completados, los integra de forma idempotente en
+`~/.bashrc` y en `~/.zshrc` (este último solo si existe) e invalida dumps
+antiguos de completado de Zsh.
 
-Si `~/bin` no está en `PATH`, añade una línea equivalente al archivo de inicio
-del shell que use realmente el usuario, sin duplicarla. Para Zsh:
+Si `~/bin` no está en `PATH`, el instalador lo avisa. Añade una línea
+equivalente al archivo de inicio del shell que use realmente el usuario, sin
+duplicarla; sirve igual en Bash y en Zsh:
 
-```zsh
+```bash
 export PATH="$HOME/bin:$PATH"
 ```
 
-No ejecutes `source ~/.zshrc` a ciegas: puede contener efectos interactivos.
-Valida su sintaxis y prueba en un proceso Zsh nuevo.
+No ejecutes `source ~/.bashrc` ni `source ~/.zshrc` a ciegas: pueden contener
+efectos interactivos. Valida su sintaxis y prueba en un proceso nuevo del shell
+que hayas tocado.
 
 Para habilitar encuentros al abrir una terminal, añade el bloque solo si el
-usuario lo quiere y colócalo en la parte interactiva de `~/.zshrc`:
+usuario lo quiere y colócalo en la parte interactiva de su `~/.bashrc` o de su
+`~/.zshrc`. Es el mismo bloque en los dos:
 
-```zsh
+```bash
 if command -v pokedex >/dev/null 2>&1; then
     pokedex hook 1-3
 elif command -v krabby >/dev/null 2>&1; then
@@ -163,14 +176,20 @@ Haz las comprobaciones finales contra la instalación estable y desde `/tmp`:
 (cd /tmp && "$HOME/bin/pokedex" --help >/dev/null)
 (cd /tmp && "${XDG_DATA_HOME:-$HOME/.local/share}/pokedex-cli/venv/bin/python" \
   -c 'import pokedex_cli; print(pokedex_cli.__file__)')
-zsh -n "$HOME/.zshrc"
+bash -n "$HOME/.bashrc"
+test -f "$HOME/.zshrc" && zsh -n "$HOME/.zshrc"
 git diff --check
 ```
 
 La ruta impresa debe estar en `site-packages/pokedex_cli`, no en el checkout.
-Si Zsh no está instalado o no existe `~/.zshrc`, informa de esa única
-verificación pendiente en vez de fingir que se ejecutó. Comprueba también que
-un Zsh nuevo encuentra `pokedex` cuando hayas cambiado `PATH`.
+Si falta uno de los dos shells o su archivo de inicio, informa de esa única
+verificación pendiente en vez de fingir que se ejecutó. Comprueba también que un
+shell nuevo encuentra `pokedex` cuando hayas cambiado `PATH`, y que el
+completado responde:
+
+```bash
+bash --norc -c 'source "$HOME/.bashrc"; complete -p pokedex'
+```
 
 Con Krabby disponible se puede hacer una prueba visual no destructiva:
 
@@ -190,10 +209,11 @@ comprobaciones.
 
 Si `install.sh` falla, conserva su salida y localiza primero la frontera:
 creación del venv, construcción/instalación de la wheel, importación de
-dependencias, escritura del shim o edición de Zsh. Corrige solo esa frontera.
-Puedes crear el entorno estable, instalar la wheel, copiar el completado o
-reparar el bloque de Zsh manualmente, pero mantén los artefactos y rutas de
-«Resultado esperado» y vuelve a ejecutar las verificaciones completas.
+dependencias, escritura del shim o edición de `~/.bashrc` / `~/.zshrc`. Corrige
+solo esa frontera. Puedes crear el entorno estable, instalar la wheel, copiar un
+completado o reparar el bloque del shell manualmente, pero mantén los artefactos
+y rutas de «Resultado esperado» y vuelve a ejecutar las verificaciones
+completas.
 
 Casos frecuentes:
 
@@ -203,8 +223,9 @@ Casos frecuentes:
   explícitamente.
 - Un error de importación desde la raíz puede quedar oculto por el checkout;
   reproduce siempre desde `/tmp`.
-- Si la edición automática de `.zshrc` no encaja con su estructura, haz una
-  modificación mínima, conserva el contenido existente y exige `zsh -n`.
+- Si la edición automática de `.bashrc` o `.zshrc` no encaja con su estructura,
+  haz una modificación mínima, conserva el contenido existente y exige `bash -n`
+  o `zsh -n` sobre el archivo tocado.
 - Si hay cambios locales en el repositorio, no los descartes ni sobrescribas;
   instala el estado que el usuario pidió y explica qué versión quedó efectiva.
 
