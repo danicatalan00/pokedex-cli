@@ -237,3 +237,21 @@ def test_missing_krabby_database_falls_back_to_only_seen_and_captured_species():
 
 def test_empty_krabby_database_and_no_local_progress_yields_an_empty_catalog():
     assert catalog(database=[]).execute() == []
+
+
+def test_rare_classification_works_without_species_cache():
+    entries = catalog(
+        database=[
+            {"idx": 150, "slug": "mewtwo", "gen": 1},
+            {"idx": 151, "slug": "mew", "gen": 1},
+            {"idx": 25, "slug": "pikachu", "gen": 1},
+        ]
+    ).execute()
+    assert [entry.slug for entry in entries if entry.is_rare] == ["mewtwo", "mew"]
+
+
+def test_rare_classification_uses_cache_in_degraded_catalog():
+    entries = catalog(
+        database=None, dex_registry={"mew", "pikachu"}, species_cache={"mew": {"is_mythical": True}}
+    ).execute()
+    assert [entry.slug for entry in entries if entry.is_rare] == ["mew"]

@@ -68,6 +68,10 @@ _pokedex() {
           _arguments \
             '--info[muestra efectividad, límites y reglas de reposición]'
           ;;
+        list)
+          _arguments \
+            '(-L --legendarios --legendary)'{-L,--legendarios,--legendary}'[solo legendarios y singulares]'
+          ;;
         search)
           _arguments \
             '(-f --form)'{-f,--form}'[forma alternativa]:forma:' \

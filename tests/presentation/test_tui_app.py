@@ -381,3 +381,31 @@ def test_sprite_del_detalle_se_conserva_y_se_reescala_al_encoger() -> None:
             assert len(resized_lines) <= widget.content_size.height
 
     asyncio.run(scenario())
+
+
+def test_legendarios_combina_filtros_y_escape_limpia():
+    from dataclasses import replace
+
+    async def scenario():
+        entries = [
+            *ENTRIES,
+            replace(_entry(150, "mewtwo", "captured"), is_rare=True),
+            replace(_entry(151, "mew", "unseen"), is_rare=True),
+        ]
+        app = PokedexApp(
+            catalog_loader=lambda: entries,
+            captures_loader=lambda: [],
+            sprite_fetcher=lambda *args: SPRITE,
+            skip_boot=True,
+        )
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press("l")
+            assert [e.slug for e in app._filtered] == ["mewtwo", "mew"]
+            await pilot.press("f", "g")
+            assert [e.slug for e in app._filtered] == ["mewtwo"]
+            await pilot.press("escape")
+            assert app._filtered == entries
+            await pilot.press("l", "l")
+            assert app._filtered == entries
+
+    asyncio.run(scenario())

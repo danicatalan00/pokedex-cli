@@ -10,6 +10,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from pokedex_cli.domain.rarity import RARE_DEX_IDS
+
 UNSEEN = "unseen"
 SEEN = "seen"
 CAPTURED = "captured"
@@ -46,6 +48,7 @@ class CatalogEntry:
     base_happiness: int | None = None
     hatch_counter: int | None = None
     abilities: tuple[str, ...] = ()
+    is_rare: bool = False
 
 
 @dataclass(frozen=True)
@@ -170,6 +173,7 @@ class PokedexCatalog:
             captures=captures,
             cache=cache,
             description=description,
+            national_id=int(raw.get("idx") or 0),
         )
 
     def _entry_without_krabby(
@@ -222,6 +226,7 @@ class PokedexCatalog:
         captures: dict[str, CaptureAggregate],
         cache: dict[str, dict[str, Any]],
         description: str | None,
+        national_id: int | None = None,
     ) -> CatalogEntry:
         capture_info = captures.get(slug)
         sighting_info = sightings.get(slug)
@@ -297,4 +302,9 @@ class PokedexCatalog:
                 else None
             ),
             abilities=abilities,
+            is_rare=(
+                national_id in RARE_DEX_IDS
+                or bool(cache_row.get("is_legendary"))
+                or bool(cache_row.get("is_mythical"))
+            ),
         )

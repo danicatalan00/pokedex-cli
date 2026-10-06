@@ -45,6 +45,7 @@ Apaga el cerebro y dirige tu agente de código hacia [INSTALL.md](INSTALL.md).
 | `pokedex cebo` | Entretenerlo: más turnos, menos captura |
 | `pokedex bolsas` | Consultar stock y actividad |
 | `pokedex list` | Ver la colección |
+| `pokedex list --legendarios` | Filtrar capturas legendarias y singulares |
 | `pokedex search <nombre>` | Consultar una especie o forma |
 | `pokedex vision <id>` | Abrir la ficha de una captura |
 | `pokedex equipo [add\|remove] [id\|nombre]` | Gestionar el equipo o elegir en un selector |
@@ -82,7 +83,8 @@ Para verlas sin gastar un encuentro: `pokedex demo -a roca` y `pokedex demo -a c
 
 Ejecuta `pokedex` sin argumentos para abrir la colección en una vista de lista.
 Puedes buscar por nombre o número, filtrar por estado y generación, y consultar
-los datos de cada Pokémon capturado.
+los datos de cada Pokémon capturado. Pulsa `l` para mostrar solo legendarios y
+singulares (también pendientes), y `Esc` para limpiar los filtros.
 
 <p align="center">
   <img src="docs/assets/pokedex-charizard.svg" width="1100" alt="Pokédex interactiva con Charizard seleccionado en la vista de lista">

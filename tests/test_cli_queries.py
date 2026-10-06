@@ -196,3 +196,13 @@ def test_type_ranking_and_rare_queries_prepare_expected_rows(connection, monkeyp
     assert [row["base_total"] for row in ranked] == [600, 21]
     assert missing == 0
     assert [row["species"] for row in rare_render.call_args.args[1]] == ["mew"]
+
+
+def test_list_legendarios_filters_normal_captures(connection, monkeypatch):
+    for species in ("pikachu", "mewtwo", "mew"):
+        add_capture(connection, species)
+        cache(connection, species, is_legendary=species == "mewtwo", is_mythical=species == "mew")
+    render = MagicMock()
+    monkeypatch.setattr(cli.display, "render_list_table", render)
+    assert cli.cmd_list(cli.build_parser().parse_args(["list", "--legendarios"])) == 0
+    assert {row["species"] for row in render.call_args.args[1]} == {"mewtwo", "mew"}

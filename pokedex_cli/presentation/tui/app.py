@@ -415,6 +415,7 @@ class PokedexApp(App[None]):
         Binding("q", "quit", "Salir"),
         Binding("slash,divide", "focus_search", "Buscar", key_display="/"),
         Binding("f", "cycle_status", "Filtro"),
+        Binding("l", "toggle_legendarios", "Legendarios"),
         Binding("g", "cycle_gen", "Gen"),
         Binding("escape", "clear_filters", "Limpiar filtros", show=False),
         Binding("enter", "open_detail", "Detalle", show=True, priority=False),
@@ -551,6 +552,7 @@ class PokedexApp(App[None]):
         self._filtered: list[CatalogEntry] = []
         self._status_filter: str | None = None
         self._gen_filter: int | None = None
+        self._rare_only = False
         self._sprite_cache: dict[tuple[str, str, bool], str | None] = {}
         self._captures_rows: list[dict[str, Any]] | None = None
         self._sprite_timer: Timer | None = None
@@ -646,7 +648,7 @@ class PokedexApp(App[None]):
         selected = self._selected_entry() if preserve_selection else None
         query = self.query_one("#busqueda", Input).value
         self._filtered = presenter.filter_entries(
-            self._entries, query, self._status_filter, self._gen_filter
+            self._entries, query, self._status_filter, self._gen_filter, self._rare_only
         )
         option_list.clear_options()
         option_list.add_options(
@@ -670,10 +672,11 @@ class PokedexApp(App[None]):
         progress = presenter.progress_summary(self._entries)
         status_label = presenter.STATUS_FILTER_LABELS[self._status_filter]
         gen_label = "Todas" if self._gen_filter is None else f"Gen {self._gen_filter}"
+        rare_label = "Legendarios" if self._rare_only else "Todos"
         header = (
             "[#85ddff]◉[/][#28aafd]◉[/]  [red1]●[/][yellow1]●[/][green1]●[/]"
             f"   [bold #241d12]POKÉDEX[/]   [#352a18]{progress}[/]"
-            f"   [{presenter.TEXT_SECONDARY}]f: {status_label} · g: {gen_label}[/]"
+            f"   [{presenter.TEXT_SECONDARY}]f: {status_label} · g: {gen_label} · l: {rare_label}[/]"
         )
         self.query_one("#cabecera", Static).update(Text.from_markup(header))
 
@@ -779,10 +782,15 @@ class PokedexApp(App[None]):
         self._gen_filter = presenter.next_gen_filter(self._gen_filter)
         self._apply_filters()
 
+    def action_toggle_legendarios(self) -> None:
+        self._rare_only = not self._rare_only
+        self._apply_filters()
+
     def action_clear_filters(self) -> None:
-        if self._status_filter is not None or self._gen_filter is not None:
+        if self._status_filter is not None or self._gen_filter is not None or self._rare_only:
             self._status_filter = None
             self._gen_filter = None
+            self._rare_only = False
             self._apply_filters()
 
     def action_open_detail(self) -> None:

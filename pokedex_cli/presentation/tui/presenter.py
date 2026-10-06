@@ -174,6 +174,7 @@ def filter_entries(
     query: str,
     status_filter: str | None,
     gen_filter: int | None,
+    rare_only: bool = False,
 ) -> list[CatalogEntry]:
     """Substring name match (case/accent-insensitive) or exact dex number,
     combined with an optional status and generation filter."""
@@ -182,6 +183,8 @@ def filter_entries(
     folded_query = _fold(query)
     result: list[CatalogEntry] = []
     for entry in entries:
+        if rare_only and not entry.is_rare:
+            continue
         if status_filter is not None and entry.status != status_filter:
             continue
         if gen_filter is not None and entry.gen != gen_filter:

@@ -485,7 +485,9 @@ def cmd_bolsas(args: argparse.Namespace) -> int:
 
 def cmd_list(args: argparse.Namespace) -> int:
     composition.backfill_individuality().execute()
-    display.render_list_table(console, _collection_queries().captures())
+    queries = _collection_queries()
+    rows = queries.rare() if getattr(args, "legendarios", False) else queries.captures()
+    display.render_list_table(console, rows)
     return 0
 
 
@@ -1065,6 +1067,13 @@ def build_parser() -> argparse.ArgumentParser:
         "list",
         help="lista tus capturas",
         description="Lista todas tus capturas con su N.º de Pokédex y orden de captura.",
+    )
+    list_parser.add_argument(
+        "-L",
+        "--legendarios",
+        "--legendary",
+        action="store_true",
+        help="muestra solo las capturas legendarias y singulares",
     )
     list_parser.set_defaults(func=cmd_list)
 
