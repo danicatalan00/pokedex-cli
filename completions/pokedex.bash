@@ -45,6 +45,7 @@ _pokedex_options() {
         ver|capturar|roca|piedra|cebo|caramelo) printf '%s' '--debug' ;;&
         capturar) printf ' %s' '-b' '--bola' ;;
         bolsas) printf '%s' '--info' ;;
+        list) printf '%s' '-L --legendarios --legendary' ;;
         ranking) printf '%s' '--equipo' ;;
         search|vision) printf '%s' '-f --form' ;;
         demo)
