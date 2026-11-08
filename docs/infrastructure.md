@@ -16,6 +16,8 @@ al dominio.
 - Los transportes HTTP son inyectables; la suite normal no usa red.
 - El escáner Git ignora dependencias, cachés, binarios y repositorios no
   accesibles; usa identidad y fechas locales explícitas.
+- La raíz del escáner es `HOME` o `POKEDEX_REPOS_ROOT`; Git se consulta como
+  mucho una vez por hora.
 - Krabby puede faltar o entregar datos incompletos sin impedir el prompt.
 - Las rutas se resuelven desde `HOME`/XDG en composición, nunca en reglas puras.
 

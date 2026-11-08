@@ -27,6 +27,18 @@ Conserva también los JSON históricos hasta confirmar su entrada en
 No borres la base como primera respuesta: contiene colección, inventario y
 actividad.
 
+## Repos que cuentan como actividad
+
+El hook busca repos Git bajo `HOME`. Para limitarlo a un directorio:
+
+```bash
+export POKEDEX_REPOS_ROOT="$HOME/Projects"
+```
+
+Los commits se sincronizan como mucho una vez por hora; las terminales de en
+medio no lanzan Git y la siguiente sincronización recoge todo lo pendiente.
+`pokedex bolsas` fuerza la sincronización y un nuevo escaneo de repos.
+
 ## Diagnóstico opt-in
 
 ```bash

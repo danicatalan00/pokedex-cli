@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import threading
 import unittest
@@ -104,3 +105,16 @@ class LastSeenConcurrencyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RepoScanRootTests(unittest.TestCase):
+    def test_defaults_to_home(self):
+        with tempfile.TemporaryDirectory() as home:
+            with patch.dict(os.environ, {"HOME": home}):
+                os.environ.pop(paths.REPOS_ROOT_ENV, None)
+                self.assertEqual(paths.repo_scan_root(), Path(home))
+
+    def test_env_var_overrides_home_and_expands_user(self):
+        with tempfile.TemporaryDirectory() as home:
+            with patch.dict(os.environ, {"HOME": home, paths.REPOS_ROOT_ENV: "~/Projects"}):
+                self.assertEqual(paths.repo_scan_root(), Path(home) / "Projects")

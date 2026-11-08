@@ -30,6 +30,7 @@ class ActivitySource(Protocol):
 class ActivityPolicy:
     passive_interval: timedelta
     repo_scan_interval: timedelta
+    commit_sync_interval: timedelta
     reward_every: Mapping[str, int]
     maximum_stock: Mapping[str, int]
     max_remembered_commits: int
@@ -125,11 +126,16 @@ class SyncActivity:
             rewards = self._sync_passive(inventory, now)
 
             first_sync = activity.get("last_repo_scan_at") is None
-            last_scan = _parse_iso(
-                activity.get("last_repo_scan_at"),
-                datetime.min.replace(tzinfo=timezone.utc),
-            )
+            never = datetime.min.replace(tzinfo=timezone.utc)
+            last_scan = _parse_iso(activity.get("last_repo_scan_at"), never)
             repositories = [Path(repo) for repo in activity.get("repositories", [])]
+            last_commit_sync = _parse_iso(activity.get("last_synced_at"), never)
+            if (
+                not force_repo_scan
+                and not first_sync
+                and now - last_commit_sync < self._policy.commit_sync_interval
+            ):
+                return SyncActivityResult(inventory, tuple(rewards), 0, len(repositories))
             if force_repo_scan or first_sync or now - last_scan >= self._policy.repo_scan_interval:
                 repositories = self._activity_source.discover_repositories(self._home)
                 activity["repositories"] = [str(repo) for repo in repositories]

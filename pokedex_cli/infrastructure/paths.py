@@ -15,6 +15,13 @@ DB_PATH = DATA_DIR / "pokedex.db"
 LAST_SEEN_PATH = DATA_DIR / "last_seen.json"
 KRABBY_POKEMON_JSON = DATA_DIR / "krabby_pokemon.json"
 INVENTORY_PATH = DATA_DIR / "inventory.json"
+REPOS_ROOT_ENV = "POKEDEX_REPOS_ROOT"
+
+
+def repo_scan_root() -> Path:
+    """Directorio donde se buscan repos Git; HOME salvo que la variable diga otro."""
+    configured = os.environ.get(REPOS_ROOT_ENV)
+    return Path(configured).expanduser() if configured else Path.home()
 
 
 def ensure_dirs() -> None:

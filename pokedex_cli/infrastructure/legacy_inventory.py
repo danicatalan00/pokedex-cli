@@ -51,6 +51,7 @@ BALL_ALIASES = {
 INITIAL_STOCK = {"superball": 3, "ultraball": 1, "masterball": 0}
 PASSIVE_INTERVAL = timedelta(hours=24)
 REPO_SCAN_INTERVAL = timedelta(hours=6)
+COMMIT_SYNC_INTERVAL = timedelta(minutes=60)
 WORKDAY_START_HOUR = 8
 WORKDAY_END_HOUR = 19
 COMMIT_REWARD_EVERY = {"superball": 3, "ultraball": 10, "masterball": 50}
@@ -250,8 +251,10 @@ def consume_ball(slug: str, path: Path | None = None) -> Inventory:
 
 
 def discover_repositories(home: Path | None = None) -> list[Path]:
-    """Encuentra repos y worktrees bajo HOME evitando árboles de dependencias."""
-    return GitActivitySource(skip_dirs=_SKIP_DIRS).discover_repositories(home or Path.home())
+    """Encuentra repos y worktrees bajo la raíz configurada evitando dependencias."""
+    return GitActivitySource(skip_dirs=_SKIP_DIRS).discover_repositories(
+        home or paths.repo_scan_root()
+    )
 
 
 def _new_work_commits(
@@ -329,6 +332,7 @@ def sync_activity(
     policy = activity_application.ActivityPolicy(
         passive_interval=PASSIVE_INTERVAL,
         repo_scan_interval=REPO_SCAN_INTERVAL,
+        commit_sync_interval=COMMIT_SYNC_INTERVAL,
         reward_every=COMMIT_REWARD_EVERY,
         maximum_stock={
             slug: ball.max_stock for slug, ball in BALLS.items() if ball.max_stock is not None
@@ -339,7 +343,7 @@ def sync_activity(
         transaction=lambda: _inventory_transaction(path, current),
         activity_source=LegacyBoundary(),
         clock=lambda: current,
-        home=home or Path.home(),
+        home=home or paths.repo_scan_root(),
         policy=policy,
     )
     return use_case.execute(force_repo_scan=force_repo_scan)

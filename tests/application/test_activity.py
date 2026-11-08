@@ -43,7 +43,9 @@ class Source:
         }
 
 
-def build(state, source, *, now=NOW, max_remembered_commits=2000):
+def build(
+    state, source, *, now=NOW, max_remembered_commits=2000, commit_sync_interval=timedelta(0)
+):
     @contextmanager
     def transaction():
         yield state
@@ -56,6 +58,7 @@ def build(state, source, *, now=NOW, max_remembered_commits=2000):
         policy=ActivityPolicy(
             passive_interval=timedelta(hours=24),
             repo_scan_interval=timedelta(hours=6),
+            commit_sync_interval=commit_sync_interval,
             reward_every={"superball": 3, "ultraball": 10, "masterball": 50},
             maximum_stock={"superball": 10, "ultraball": 5, "masterball": 1},
             max_remembered_commits=max_remembered_commits,
@@ -112,6 +115,43 @@ def test_scan_policy_uses_cached_repositories_until_forced():
     assert forced.repositories == 1
     assert state["activity"]["repositories"] == ["/work/fresh"]
     assert state["activity"]["last_repo_scan_at"] == NOW.isoformat()
+
+
+def test_commit_sync_waits_for_its_interval_and_then_catches_up():
+    last_sync = NOW - timedelta(minutes=30)
+    state = inventory_state(
+        last_synced_at=last_sync.isoformat(),
+        last_passive_at=(NOW - timedelta(days=1)).isoformat(),
+    )
+    source = Source((WorkCommit("abc", 1, 0),))
+
+    early = build(state, source, commit_sync_interval=timedelta(minutes=60)).execute()
+
+    assert source.requests == []
+    assert early.new_work_commits == 0
+    assert [(reward.slug, reward.source) for reward in early.rewards] == [("superball", "tiempo")]
+    assert state["activity"]["last_synced_at"] == last_sync.isoformat()
+
+    later = NOW + timedelta(minutes=31)
+    caught_up = build(
+        state, source, now=later, commit_sync_interval=timedelta(minutes=60)
+    ).execute()
+
+    assert [since for _, since, _ in source.requests] == [last_sync]
+    assert caught_up.new_work_commits == 1
+    assert state["activity"]["last_synced_at"] == later.isoformat()
+
+
+def test_forced_sync_ignores_the_commit_interval():
+    state = inventory_state()
+    source = Source((WorkCommit("abc", 1, 0),))
+
+    result = build(state, source, commit_sync_interval=timedelta(minutes=60)).execute(
+        force_repo_scan=True
+    )
+
+    assert len(source.requests) == 1
+    assert result.new_work_commits == 1
 
 
 def test_stock_is_capped_and_processed_history_is_bounded():

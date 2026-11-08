@@ -5,7 +5,7 @@ import tempfile
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -105,7 +105,10 @@ class InventoryTests(unittest.TestCase):
                 return {}
             return {commit.oid: commit}
 
-        with patch.object(inventory, "_new_work_commits", side_effect=candidates):
+        with (
+            patch.object(inventory, "COMMIT_SYNC_INTERVAL", timedelta(0)),
+            patch.object(inventory, "_new_work_commits", side_effect=candidates),
+        ):
             with ThreadPoolExecutor(max_workers=20) as pool:
                 results = list(
                     pool.map(
