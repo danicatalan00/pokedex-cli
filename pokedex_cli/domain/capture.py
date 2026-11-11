@@ -32,16 +32,22 @@ def catch_chance(
     ball_multiplier: float = 1.0,
     level: int = 5,
     mood_multiplier: float = 1.0,
+    battle_multiplier: float = 1.0,
 ) -> float:
     """Return a validated capture probability in the closed interval [0, 1].
 
     ``mood_multiplier`` carries the Safari state (rocks and bait). It is applied
     after the Master Ball shortcut on purpose: that ball never fails, whatever
     the Pokémon's mood.
+
+    ``battle_multiplier`` lleva el estado del combate (PS que le quedan al
+    salvaje y su problema de estado). Se valida igual que el ánimo y también
+    se aplica después del atajo de la Masterball.
     """
     del shiny  # Reserved for an explicit future rule; it has no effect today.
     multiplier = _validated_multiplier(ball_multiplier, "ball_multiplier")
     mood = _validated_multiplier(mood_multiplier, "mood_multiplier")
+    battle = _validated_multiplier(battle_multiplier, "battle_multiplier")
 
     if capture_rate is not None:
         if isinstance(capture_rate, bool) or not isinstance(capture_rate, int):
@@ -56,7 +62,12 @@ def catch_chance(
     else:
         base = capture_rate / 255
     level_factor = math.sqrt(5 / max(1, int(level)))
-    return max(0.0, min(1.0, base * multiplier * level_factor * mood))
+    chance = base * multiplier * level_factor * mood * battle
+    if math.isnan(chance):
+        # Solo sale NaN de infinito × 0: un factor enorme desbordó y otro es
+        # nulo, así que el producto exacto es 0 (acotar NaN daría 1).
+        return 0.0
+    return max(0.0, min(1.0, chance))
 
 
 def escape_after_attempts(

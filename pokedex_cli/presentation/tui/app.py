@@ -6,8 +6,11 @@ especie se renderiza con efecto de carga retro: sprite a color si está
 capturada, silueta braille si solo está vista, estática si aún no.
 
 Todo el estado que necesita la app llega por inyección (catálogo, queries de
-colección y renderer de sprites), de modo que los tests montan la app con
-dobles sin tocar la base de datos real, el HOME ni la red.
+colección, renderer de sprites y servicios de combate), de modo que los tests
+montan la app con dobles sin tocar la base de datos real, el HOME ni la red.
+
+La tecla ``c`` abre el lanzador de combate (``tui.battle``); ese módulo se
+importa solo al usarlo para no alargar el arranque de la Pokédex.
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ from __future__ import annotations
 import random
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from rich.text import Text
 from textual import events, work
@@ -31,6 +34,10 @@ from pokedex_cli.application.pokedex_catalog import UNSEEN, CatalogEntry
 from pokedex_cli.presentation import display
 from pokedex_cli.presentation.tui import graphics, presenter
 from pokedex_cli.presentation.tui.assets import POKEBALL_BRAILLE
+
+if TYPE_CHECKING:
+    from pokedex_cli.application.movesets import MovesetView
+    from pokedex_cli.presentation.tui.battle import BattleChoice, BattleServices, BattleSummary
 
 SCREEN_WIDTH = 44
 LCD_INK = "#241d12"
@@ -240,6 +247,9 @@ class DetailScreen(Screen[None]):
         }
         self._rows = self._rows_by_species.get(entry.slug, [])
         self._index = 0
+        # Movimientos de cada captura ya consultados (None: sin datos) y en camino.
+        self._movesets: dict[int, MovesetView | None] = {}
+        self._loading_movesets: set[int] = set()
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="detalle-cuerpo"):
@@ -317,6 +327,11 @@ class DetailScreen(Screen[None]):
         data_panel = self.query_one("#detalle-datos")
         data_panel.styles.border = ("double", accent)
         data_panel.border_title = f"◓ {presenter.visible_name(self._entry).upper()}"
+        self._render_ficha()
+        self.query_one("#detalle-evoluciones", Static).update(self._evolution_strip())
+        self.call_after_refresh(self._render_sprite)
+
+    def _render_ficha(self) -> None:
         row = self._rows[self._index] if self._rows else None
         species_lines = presenter.detail_lines(self._entry, show_stat_bars=True)
         if row:
@@ -325,11 +340,54 @@ class DetailScreen(Screen[None]):
                     "",
                     f"[bold {presenter.SECTION_TEXT}]INDIVIDUO[/]",
                     *self._individual_lines(row),
+                    "",
+                    *self._moveset_lines(row),
                 ]
             )
         self.query_one("#detalle-ficha", Static).update(Text.from_markup("\n".join(species_lines)))
-        self.query_one("#detalle-evoluciones", Static).update(self._evolution_strip())
-        self.call_after_refresh(self._render_sprite)
+
+    def _moveset_lines(self, row: dict[str, Any]) -> list[str]:
+        """Sección MOVIMIENTOS: se consulta en un hilo (puede descargar datos)
+        y mientras tanto la ficha dice «cargando…»."""
+        from pokedex_cli.presentation.tui.battle import moveset_markup
+
+        capture_id = int(row["id"])
+        if capture_id in self._movesets:
+            return moveset_markup(self._movesets[capture_id])
+        if capture_id not in self._loading_movesets:
+            self._loading_movesets.add(capture_id)
+            services = self._app_ref.battle_services
+            self._load_moveset(capture_id, services.moveset, services.report)
+        return moveset_markup(None, loading=True)
+
+    @work(thread=True, group="movimientos", exit_on_error=False)
+    def _load_moveset(
+        self,
+        capture_id: int,
+        loader: Callable[[int], MovesetView | None],
+        report: Callable[[str, BaseException], None],
+    ) -> None:
+        try:
+            view = loader(capture_id)
+        except Exception as error:
+            view = None
+            try:
+                report("TUI moveset", error)
+            except Exception:  # registrar el fallo nunca rompe la ficha
+                pass
+        try:
+            self._app_ref.call_from_thread(self._moveset_ready, capture_id, view)
+        except RuntimeError:  # la app ya ha terminado
+            pass
+
+    def _moveset_ready(self, capture_id: int, view: MovesetView | None) -> None:
+        self._loading_movesets.discard(capture_id)
+        self._movesets[capture_id] = view
+        if not self.is_attached:
+            return
+        row = self._rows[self._index] if self._rows else None
+        if row is not None and int(row["id"]) == capture_id:
+            self._render_ficha()
 
     def _render_sprite(self) -> None:
         row = self._rows[self._index] if self._rows else None
@@ -419,6 +477,7 @@ class PokedexApp(App[None]):
         Binding("g", "cycle_gen", "Gen"),
         Binding("escape", "clear_filters", "Limpiar filtros", show=False),
         Binding("enter", "open_detail", "Detalle", show=True, priority=False),
+        Binding("c", "battle", "Combate"),
     ]
 
     CSS = f"""
@@ -533,6 +592,9 @@ class PokedexApp(App[None]):
         background: {DEX_OLIVE};
         color: {LCD_INK};
     }}
+    /* Paneles del combate: dejan ver atenuado lo que hay debajo (la regla
+       Screen de arriba los haría opacos). */
+    BattleLauncher, PartyPanel, BagPanel, ResultPanel {{ background: #17140c 60%; }}
     """
 
     def __init__(
@@ -542,12 +604,16 @@ class PokedexApp(App[None]):
         captures_loader: CapturesLoader = _default_captures_loader,
         sprite_fetcher: SpriteFetcher = _default_sprite_fetcher,
         skip_boot: bool = False,
+        battle_services: BattleServices | None = None,
     ) -> None:
         super().__init__()
         self._catalog_loader = catalog_loader
         self._captures_loader = captures_loader
         self._sprite_fetcher = sprite_fetcher
         self._skip_boot = skip_boot
+        self._battle_services = battle_services
+        self._reloading = False
+        self.last_battle: BattleSummary | None = None
         self._entries: list[CatalogEntry] = []
         self._filtered: list[CatalogEntry] = []
         self._status_filter: str | None = None
@@ -585,6 +651,15 @@ class PokedexApp(App[None]):
             self.push_screen(BootScreen())
 
     # --- estado / helpers ---------------------------------------------------
+
+    @property
+    def battle_services(self) -> BattleServices:
+        """Servicios del combate; los de serie usan ``composition`` al llamarlos."""
+        if self._battle_services is None:
+            from pokedex_cli.presentation.tui.battle import BattleServices
+
+            self._battle_services = BattleServices()
+        return self._battle_services
 
     def sprite_cached(self, species: str, form: str, shiny: bool) -> str | None:
         key = (species, form, shiny)
@@ -794,10 +869,67 @@ class PokedexApp(App[None]):
             self._apply_filters()
 
     def action_open_detail(self) -> None:
+        if self._reloading:
+            return
         entry = self._selected_entry()
         if entry is None or entry.status == UNSEEN:
             return
         self.push_screen(DetailScreen(self, entry, self._captures()))
+
+    # --- combate --------------------------------------------------------------
+
+    def action_battle(self) -> None:
+        """Lanzador de combate; solo desde la lista (no desde la ficha ni el arranque)."""
+        if self._reloading or self.screen is not self.screen_stack[0]:
+            return
+        from pokedex_cli.presentation.tui.battle import BattleLauncher
+
+        self.push_screen(BattleLauncher(self.battle_services), self._battle_chosen)
+
+    def _battle_chosen(self, choice: BattleChoice | None) -> None:
+        if choice is None:
+            return
+        from pokedex_cli.presentation.tui.battle import BattleScreen
+
+        self.push_screen(
+            BattleScreen(choice, services=self.battle_services, sprites=self.sprite_cached),
+            self._battle_closed,
+        )
+
+    def _battle_closed(self, summary: BattleSummary | None) -> None:
+        # EXP, niveles, capturas o un encuentro que ya no está: se recarga todo.
+        self.last_battle = summary
+        if summary is not None and summary.notice:
+            self.notify(summary.notice, timeout=4)
+        self._reloading = True
+        self._reload_collection()
+
+    @work(thread=True, exclusive=True, group="recarga", exit_on_error=False)
+    def _reload_collection(self) -> None:
+        try:
+            entries = self._catalog_loader()
+            rows = self._captures_loader()
+        except Exception as error:
+            try:
+                self.battle_services.report("TUI reload", error)
+            except Exception:  # registrar el fallo nunca rompe la Pokédex
+                pass
+            entries, rows = None, None
+        try:
+            self.call_from_thread(self._collection_reloaded, entries, rows)
+        except RuntimeError:  # la app ya ha terminado
+            pass
+
+    def _collection_reloaded(
+        self, entries: list[CatalogEntry] | None, rows: list[dict[str, Any]] | None
+    ) -> None:
+        self._reloading = False
+        if entries is None:
+            return
+        self._entries = entries
+        self._captures_rows = rows
+        if self.screen is self.screen_stack[0]:
+            self._apply_filters()
 
 
 def run_tui(
@@ -805,11 +937,13 @@ def run_tui(
     catalog_loader: CatalogLoader = _default_catalog_loader,
     captures_loader: CapturesLoader = _default_captures_loader,
     sprite_fetcher: SpriteFetcher = _default_sprite_fetcher,
+    battle_services: BattleServices | None = None,
 ) -> int:
     app = PokedexApp(
         catalog_loader=catalog_loader,
         captures_loader=captures_loader,
         sprite_fetcher=sprite_fetcher,
+        battle_services=battle_services,
     )
     app.run()
     return 0

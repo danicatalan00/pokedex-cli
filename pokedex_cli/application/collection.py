@@ -80,11 +80,16 @@ class CollectionQueries:
 
     def resolve(self, identifier: str, form: str | None) -> CaptureView | None:
         rows = self.captures()
-        if identifier.isdigit():
+        if identifier.isdecimal():
             capture_id = int(identifier)
             return next((row for row in rows if int(row["id"]) == capture_id), None)
-        species = normalize_species(identifier)
-        canonical_form = normalize_form(form) if form is not None else None
+        try:
+            species = normalize_species(identifier)
+            canonical_form = normalize_form(form) if form is not None else None
+        except ValueError:
+            # «?», «#»…: un nombre que no deja letras ni números no encaja con
+            # ninguna captura; una consulta no debe acabar en traza por ello.
+            return None
         return next(
             (
                 row

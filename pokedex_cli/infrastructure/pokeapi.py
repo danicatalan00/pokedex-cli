@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 import requests
 
@@ -52,6 +52,13 @@ class HttpSession(Protocol):
 
 class SpeciesClient(Protocol):
     def fetch_species_data(self, species: str, form: str) -> dict[str, Any]: ...
+
+
+@runtime_checkable
+class MoveClient(Protocol):
+    """Cliente que además sabe descargar movimientos (``/move/{slug}``)."""
+
+    def fetch_move_data(self, slug: str) -> dict[str, Any]: ...
 
 
 class PokeApiClient:
@@ -139,6 +146,13 @@ class PokeApiClient:
                 evolution_cache[url] = self._get_json(url)
             return evolution_cache[url]
 
+        # El learnset sale del mismo /pokemon que ya se descargó. Solo una
+        # forma que PokeAPI deja sin movimientos (las Gigamax, que en el juego
+        # conservan los de la especie) pide además la variedad por defecto.
+        moves_version_group, level_moves = parsing._level_up_learnset(pokemon_json)
+        if not level_moves and variety_name != default_variety:
+            default_json = self._get_json(f"{self._base_url}/pokemon/{default_variety}")
+            moves_version_group, level_moves = parsing._level_up_learnset(default_json)
         return {
             "pokedex_id": species_json["id"],
             "capture_rate": species_json["capture_rate"],
@@ -165,8 +179,16 @@ class PokeApiClient:
             "evolution_chain": parsing._evolution_chain(species_json, fetch_evolution),
             "flavor_text": parsing._flavor_text(species_json),
             "form_data_exact": form_data_exact,
+            "level_moves": level_moves,
+            "moves_version_group": moves_version_group,
             **parsing._pokemon_stats_and_types(pokemon_json),
         }
+
+    def fetch_move_data(self, slug: str) -> dict[str, Any]:
+        """Movimiento como registro de caché con las claves de ``Move``."""
+        move_json = self._get_json(f"{self._base_url}/move/{slug}")
+        self._validate_move(move_json)
+        return parsing._move_record(move_json)
 
     @staticmethod
     def _validate_species(payload: dict[str, Any]) -> None:
@@ -183,6 +205,17 @@ class PokeApiClient:
             raise InvalidResponse("pokemon types are missing")
         if not isinstance(payload.get("stats"), list):
             raise InvalidResponse("pokemon stats are missing")
+
+    @staticmethod
+    def _validate_move(payload: dict[str, Any]) -> None:
+        if not isinstance(payload.get("id"), int):
+            raise InvalidResponse("move id is missing")
+        if parsing._resource_name(payload) is None:
+            raise InvalidResponse("move name is missing")
+        if parsing._resource_name(payload.get("type")) is None:
+            raise InvalidResponse("move type is missing")
+        if not isinstance(payload.get("pp"), int):
+            raise InvalidResponse("move pp is missing")
 
 
 class TolerantPokeApiClient:
@@ -201,4 +234,15 @@ class TolerantPokeApiClient:
             return self._client.fetch_species_data(species, form)
         except PokeApiError as error:
             self._on_error("PokeAPI fallback", error)
+            return None
+
+    def fetch_move_data(self, slug: str) -> dict[str, Any] | None:
+        """Movimiento o ``None`` (sin red, respuesta inválida o un cliente que
+        solo sabe de especies): el combate tira de los movimientos de reserva."""
+        if not isinstance(self._client, MoveClient):
+            return None
+        try:
+            return self._client.fetch_move_data(slug)
+        except PokeApiError as error:
+            self._on_error("PokeAPI move fallback", error)
             return None

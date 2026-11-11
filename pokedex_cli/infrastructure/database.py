@@ -345,6 +345,74 @@ def _migration_012_safari_items(connection: sqlite3.Connection) -> None:
             connection.execute(f"ALTER TABLE encounter_state ADD COLUMN {column} {declaration}")
 
 
+def _migration_013_battle_data(connection: sqlite3.Connection) -> None:
+    """Datos del combate: learnset por nivel, caché de movimientos y movesets.
+
+    ``level_moves`` NULL significa «aún sin learnset» (perfiles descargados
+    antes de esta migración): el combate refresca esa especie. Una captura sin
+    filas en ``capture_moves`` usa el moveset automático.
+    """
+    cache_columns = _columns(connection, "species_cache")
+    additions = {
+        "level_moves": "TEXT",
+        "moves_version_group": "TEXT",
+    }
+    for column, declaration in additions.items():
+        if column not in cache_columns:
+            connection.execute(f"ALTER TABLE species_cache ADD COLUMN {column} {declaration}")
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS move_cache (
+            slug TEXT PRIMARY KEY,
+            record TEXT NOT NULL,
+            fetched_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS capture_moves (
+            capture_id INTEGER NOT NULL REFERENCES captures(id) ON DELETE CASCADE,
+            slot INTEGER NOT NULL CHECK (slot BETWEEN 0 AND 3),
+            move TEXT NOT NULL,
+            PRIMARY KEY (capture_id, slot)
+        )
+        """
+    )
+
+
+def _migration_014_battles(connection: sqlite3.Connection) -> None:
+    """Combate en curso (uno como mucho; las exhibiciones no se guardan) y
+    récord acumulado del jugador."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS battle_state (
+            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+            kind TEXT NOT NULL CHECK (kind IN ('wild', 'trainer')),
+            state_json TEXT NOT NULL,
+            encounter_seen_at TEXT,
+            started_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS battle_record (
+            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+            wild_battles INTEGER NOT NULL DEFAULT 0 CHECK (wild_battles >= 0),
+            wild_wins INTEGER NOT NULL DEFAULT 0 CHECK (wild_wins >= 0),
+            wild_captures INTEGER NOT NULL DEFAULT 0 CHECK (wild_captures >= 0),
+            trainer_wins INTEGER NOT NULL DEFAULT 0 CHECK (trainer_wins >= 0),
+            trainer_losses INTEGER NOT NULL DEFAULT 0 CHECK (trainer_losses >= 0),
+            streak INTEGER NOT NULL DEFAULT 0 CHECK (streak >= 0),
+            best_streak INTEGER NOT NULL DEFAULT 0 CHECK (best_streak >= 0),
+            last_battle_at TEXT
+        )
+        """
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     (1, _migration_001_base_schema),
     (2, _migration_002_capture_rules),
@@ -358,6 +426,8 @@ MIGRATIONS: tuple[Migration, ...] = (
     (10, _migration_010_encounter_levels),
     (11, _migration_011_pokedex_profiles),
     (12, _migration_012_safari_items),
+    (13, _migration_013_battle_data),
+    (14, _migration_014_battles),
 )
 
 

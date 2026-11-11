@@ -90,6 +90,29 @@ def test_vision_shows_placeholder_ability_and_refresh_hint_when_unknown():
     assert "datos pendientes: pokedex refresh" in output
 
 
+def test_vision_lists_the_moves_it_fights_with():
+    from pokedex_cli.domain.battle.moves import FALLBACK_BY_TYPE, TACKLE
+
+    console = Console(width=140)
+    with console.capture() as captured:
+        display.render_vision_card(
+            console,
+            enriched_row(),
+            sprite=None,
+            moves=(FALLBACK_BY_TYPE["electric"], TACKLE),
+            custom_moves=True,
+        )
+    output = captured.get()
+    assert "Movimientos · elegidos por ti" in output
+    assert "Impactrueno" in output
+    assert "Eléctrico · Especial · Pot 40 · Prec 100 · PP 30" in output
+    assert "Placaje" in output
+
+
+def test_vision_without_moves_has_no_moves_section():
+    assert "Movimientos" not in render(enriched_row())
+
+
 def test_list_table_shows_gender_symbol_after_the_name():
     row = {
         "id": 1,

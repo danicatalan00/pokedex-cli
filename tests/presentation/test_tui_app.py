@@ -4,12 +4,16 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 
 import pytest
 
 textual = pytest.importorskip("textual")
 
+from pokedex_cli.application.movesets import MovesetView  # noqa: E402
 from pokedex_cli.application.pokedex_catalog import CatalogEntry  # noqa: E402
+from pokedex_cli.domain.battle.model import Outcome  # noqa: E402
+from pokedex_cli.domain.battle.moves import TACKLE  # noqa: E402
 from pokedex_cli.presentation.tui.app import (  # noqa: E402
     SPRITE_DEBOUNCE,
     DetailScreen,
@@ -17,6 +21,42 @@ from pokedex_cli.presentation.tui.app import (  # noqa: E402
     PokedexScreenWidget,
     static_noise,
 )
+from pokedex_cli.presentation.tui.battle import (  # noqa: E402
+    PAUSED_NOTICE,
+    BattleLauncher,
+    BattleScreen,
+    BattleServices,
+    LauncherOptions,
+    OpenedBattle,
+    ResultPanel,
+    WildPreview,
+)
+from tests.presentation.test_tui_battle import (  # noqa: E402
+    EMBER,
+    OPENING,
+    FakeSession,
+    FakeSprites,
+    press_at_once,
+    wait_for,
+    wild_state,
+    winning_turn,
+)
+
+
+def offline_services(**overrides: object) -> BattleServices:
+    """Servicios de combate sin composition: ni BD, ni HOME, ni red."""
+    values: dict[str, object] = {
+        "options": lambda: LauncherOptions(),
+        "open_session": lambda choice, progress: "Sin combate en los tests.",
+        "bag": lambda: [],
+        "record": lambda: {},
+        "moveset": lambda capture_id: None,
+        "report": lambda context, error: None,
+        "speed": 1000.0,
+    }
+    values.update(overrides)
+    return BattleServices(**values)  # type: ignore[arg-type]
+
 
 SPRITE = "\x1b[38;2;255;0;0m▀▀\x1b[0m\n\x1b[38;2;0;255;0m▄▄\x1b[0m"
 
@@ -87,6 +127,7 @@ def _app() -> PokedexApp:
         captures_loader=lambda: [dict(CAPTURE_ROW)],
         sprite_fetcher=lambda species, form, shiny: SPRITE,
         skip_boot=True,
+        battle_services=offline_services(),
     )
 
 
@@ -188,6 +229,7 @@ def test_la_pantalla_de_arranque_se_cierra_sola_sin_error() -> None:
             captures_loader=lambda: [dict(CAPTURE_ROW)],
             sprite_fetcher=lambda species, form, shiny: SPRITE,
             skip_boot=False,
+            battle_services=offline_services(),
         )
         async with app.run_test(size=(120, 40)) as pilot:
             assert len(app.screen_stack) == 2  # arranque encima
@@ -237,6 +279,7 @@ def test_scroll_rapido_no_lanza_un_sprite_por_fila() -> None:
         captures_loader=lambda: [],
         sprite_fetcher=counting_fetcher,
         skip_boot=True,
+        battle_services=offline_services(),
     )
 
     async def scenario() -> None:
@@ -265,11 +308,13 @@ def test_pantalla_principal_conserva_un_sprite_grande_que_cabe() -> None:
             captures_loader=lambda: [dict(CAPTURE_ROW)],
             sprite_fetcher=lambda species, form, shiny: large_sprite,
             skip_boot=True,
+            battle_services=offline_services(),
         )
         async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
             screen = app.query_one(PokedexScreenWidget)
-            assert screen._content is not None
+            # El sprite llega tras el antirrebote y un hilo: se espera a él en
+            # vez de suponer que un solo pause() basta (dependía del reloj).
+            await wait_for(pilot, lambda: screen._content is not None and screen._content.ansi)
             assert len(screen._content.lines) == 20
 
             await pilot.resize_terminal(80, 22)
@@ -320,6 +365,7 @@ def test_familia_evolutiva_respeta_la_cadena_y_no_el_numero_de_pokedex() -> None
             captures_loader=lambda: [],
             sprite_fetcher=lambda species, form, shiny: SPRITE,
             skip_boot=True,
+            battle_services=offline_services(),
         )
         async with app.run_test(size=(120, 40)):
             ordered = app.evolution_family(entries[0])
@@ -367,6 +413,7 @@ def test_sprite_del_detalle_se_conserva_y_se_reescala_al_encoger() -> None:
             captures_loader=lambda: [dict(CAPTURE_ROW)],
             sprite_fetcher=lambda species, form, shiny: large_sprite,
             skip_boot=True,
+            battle_services=offline_services(),
         )
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.press("enter")
@@ -397,6 +444,7 @@ def test_legendarios_combina_filtros_y_escape_limpia():
             captures_loader=lambda: [],
             sprite_fetcher=lambda *args: SPRITE,
             skip_boot=True,
+            battle_services=offline_services(),
         )
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.press("l")
@@ -409,3 +457,179 @@ def test_legendarios_combina_filtros_y_escape_limpia():
             assert app._filtered == entries
 
     asyncio.run(scenario())
+
+
+# --- Combate desde la Pokédex ------------------------------------------------------
+
+
+def _battle_app(session, *, catalogs=None, captures=None, moveset=None, notices=None):
+    """Pokédex con un combate guionizado detrás de la tecla c."""
+    loads = {"catalog": 0, "captures": 0}
+    catalogs = catalogs or [list(ENTRIES)]
+
+    def catalog_loader():
+        loads["catalog"] += 1
+        return list(catalogs[min(loads["catalog"], len(catalogs)) - 1])
+
+    def captures_loader():
+        loads["captures"] += 1
+        return [dict(row) for row in (captures or [CAPTURE_ROW])]
+
+    services = offline_services(
+        options=lambda: LauncherOptions(
+            wild=WildPreview("Pidgey", 12), trainer=True, exhibition=True
+        ),
+        open_session=lambda choice, progress: OpenedBattle(session),
+        moveset=moveset or (lambda capture_id: None),
+    )
+    app = PokedexApp(
+        catalog_loader=catalog_loader,
+        captures_loader=captures_loader,
+        sprite_fetcher=FakeSprites(),
+        skip_boot=True,
+        battle_services=services,
+    )
+    if notices is not None:
+        app.notify = lambda message, **options: notices.append(message)
+    return app, loads
+
+
+def test_c_abre_el_lanzador_solo_con_las_opciones_posibles() -> None:
+    async def scenario() -> None:
+        app, _ = _battle_app(FakeSession(wild_state()))
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press("c")
+            await wait_for(pilot, lambda: isinstance(app.screen, BattleLauncher))
+            launcher = app.screen
+            await wait_for(pilot, lambda: launcher.options is not None)
+            labels = [option.prompt for option in launcher.query_one("#lanzador-lista").options]
+            assert labels[0] == "Pokémon salvaje: Pidgey Nv. 12"
+            assert len(labels) == 3 and not any("Reanudar" in label for label in labels)
+            await pilot.press("escape")
+            await wait_for(pilot, lambda: len(app.screen_stack) == 1)
+
+    asyncio.run(scenario())
+
+
+def test_combate_completo_y_al_volver_la_pokedex_recarga_catalogo_y_capturas() -> None:
+    from dataclasses import replace
+
+    pidgey = replace(_entry(16, "pidgey", "captured"), name="Pidgey")
+    session = FakeSession(wild_state(), [winning_turn], opening=OPENING)
+
+    async def scenario() -> None:
+        app, loads = _battle_app(session, catalogs=[list(ENTRIES), [*ENTRIES, pidgey]])
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press("c")
+            await wait_for(pilot, lambda: getattr(app.screen, "options", None) is not None)
+            await pilot.press("enter")  # Pokémon salvaje
+            await wait_for(
+                pilot, lambda: isinstance(app.screen, BattleScreen) and app.screen.mode == "main"
+            )
+            await pilot.press("1", "1")  # LUCHAR → Ascuas
+            await wait_for(pilot, lambda: isinstance(app.screen, ResultPanel))
+            assert app.screen.summary.title == "¡VICTORIA!"
+            await pilot.press("escape")
+            await wait_for(pilot, lambda: len(app.screen_stack) == 1 and not app._reloading)
+            assert loads == {"catalog": 2, "captures": 1}
+            assert app.query_one("#lista").option_count == len(ENTRIES) + 1
+            assert app.last_battle is not None and app.last_battle.outcome is Outcome.WON
+
+    asyncio.run(scenario())
+
+
+def test_dos_enter_seguidos_en_el_lanzador_abren_un_solo_combate_sin_romper_la_app() -> None:
+    # Con el segundo Enter el lanzador ya está cerrado: antes, Textual sacaba
+    # también la pantalla de debajo y la Pokédex caía con ScreenStackError.
+    async def scenario() -> None:
+        app, _ = _battle_app(FakeSession(wild_state()))
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press("c")
+            await wait_for(pilot, lambda: getattr(app.screen, "options", None) is not None)
+            await press_at_once(pilot, "enter", "enter")
+            await wait_for(
+                pilot, lambda: isinstance(app.screen, BattleScreen) and app.screen.mode == "main"
+            )
+            assert [type(screen) for screen in app.screen_stack[1:]] == [BattleScreen]
+
+    asyncio.run(scenario())
+
+
+def test_dejar_un_combate_a_medias_avisa_de_que_queda_en_pausa() -> None:
+    notices: list[str] = []
+
+    async def scenario() -> None:
+        app, _ = _battle_app(FakeSession(wild_state()), notices=notices)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press("c")
+            await wait_for(pilot, lambda: getattr(app.screen, "options", None) is not None)
+            await pilot.press("enter")
+            await wait_for(
+                pilot, lambda: isinstance(app.screen, BattleScreen) and app.screen.mode == "main"
+            )
+            await pilot.press("escape")
+            await wait_for(pilot, lambda: len(app.screen_stack) == 1 and not app._reloading)
+            assert notices == [PAUSED_NOTICE]
+            assert app.last_battle is not None and not app.last_battle.finished
+
+    asyncio.run(scenario())
+
+
+def test_c_no_abre_el_combate_desde_la_ficha() -> None:
+    async def scenario() -> None:
+        app, _ = _battle_app(FakeSession(wild_state()))
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press("enter")
+            await pilot.pause()
+            assert isinstance(app.screen, DetailScreen)
+            await pilot.press("c")
+            await pilot.pause()
+            assert isinstance(app.screen, DetailScreen)
+            assert len(app.screen_stack) == 2
+
+    asyncio.run(scenario())
+
+
+def test_la_ficha_del_individuo_carga_sus_movimientos_sin_bloquear() -> None:
+    gate = threading.Event()
+    calls: list[tuple[int, str]] = []
+
+    def slow_moveset(capture_id: int) -> MovesetView:
+        calls.append((capture_id, threading.current_thread().name))
+        assert gate.wait(10)
+        return MovesetView(
+            capture_id=capture_id,
+            name="Bulbasaur",
+            species="bulbasaur",
+            form="regular",
+            level=12,
+            types=("grass", "poison"),
+            custom=True,
+            moves=(EMBER, TACKLE),
+            learnable=(),
+            upcoming=(),
+        )
+
+    async def scenario() -> None:
+        app, _ = _battle_app(FakeSession(wild_state()), moveset=slow_moveset)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press("enter")
+            await pilot.pause()
+            detail = app.screen
+            assert isinstance(detail, DetailScreen)
+            ficha = detail.query_one("#detalle-ficha")
+            assert "MOVIMIENTOS cargando…" in str(ficha.render())
+            # La ficha sigue respondiendo mientras tanto.
+            await pilot.press("full_stop")
+            gate.set()
+            await wait_for(pilot, lambda: "Ascuas" in str(ficha.render()))
+            text = str(ficha.render())
+            assert "MOVIMIENTOS elegidos por ti" in text
+            assert "Pot Prec  PP" in text and "Placaje" in text
+            assert calls == [(7, calls[0][1])]
+            assert calls[0][1] != threading.main_thread().name
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        gate.set()

@@ -74,6 +74,22 @@ class CaptureStatus(str, Enum):
 
 
 @dataclass(frozen=True)
+class CapturedIndividual:
+    """Pokémon concreto que se captura tal cual, sin tirar dados.
+
+    El rival de un combate ya tiene nivel, IV, naturaleza, sexo, habilidad y
+    EXP: capturarlo debe guardar ese mismo individuo, no uno recién tirado.
+    """
+
+    level: int
+    ivs: Mapping[str, int]
+    nature: str
+    gender: str | None
+    ability: str | None
+    experience: int
+
+
+@dataclass(frozen=True)
 class CaptureCommand:
     ball_slug: str
     ball_multiplier: float
@@ -86,6 +102,11 @@ class CaptureCommand:
     encounter_level: int = STARTING_LEVEL
     gender_rate: int | None = None
     abilities: tuple[str, ...] = ()
+    # Factor del combate (PS y estado del salvaje); 1 fuera de combate.
+    battle_multiplier: float = 1.0
+    # Solo decide qué se inserta: la probabilidad sigue usando el nivel del
+    # encuentro, igual que fuera de combate.
+    individual: CapturedIndividual | None = None
 
 
 @dataclass(frozen=True)
@@ -122,93 +143,117 @@ class CaptureEncounter:
         connection = self._connection_factory()
         try:
             connection.execute("BEGIN IMMEDIATE")
-            inventory = self._inventory_repository.load_in_transaction(
-                connection, self._inventory_normaliser
-            )
-            encounter = self._encounter_repository.load_in_transaction(connection)
-            if encounter is None:
-                connection.commit()
-                return CaptureResult(CaptureStatus.NO_ENCOUNTER)
-            if bool(encounter["captured"]):
-                connection.commit()
-                return CaptureResult(CaptureStatus.ALREADY_CAPTURED)
-
-            if command.ball_slug != "pokeball":
-                stock = max(0, int(inventory["balls"].get(command.ball_slug, 0)))
-                if stock == 0:
-                    connection.commit()
-                    return CaptureResult(CaptureStatus.NO_STOCK)
-                inventory["balls"][command.ball_slug] = stock - 1
-
-            level = max(
-                STARTING_LEVEL,
-                int(command.encounter_level),
-                50 if command.is_legendary else STARTING_LEVEL,
-            )
-            chance = catch_chance(
-                command.capture_rate,
-                is_legendary=command.is_legendary,
-                is_mythical=command.is_mythical,
-                shiny=bool(encounter["shiny"]),
-                ball_multiplier=command.ball_multiplier,
-                level=level,
-                mood_multiplier=catch_stage_multiplier(int(encounter.get("catch_stage") or 0)),
-            )
-            caught = self._random.random() < chance
-            self._inventory_repository.save_in_transaction(connection, inventory)
-            if caught:
-                encounter["captured"] = True
-                self._encounter_repository.save_in_transaction(connection, encounter)
-                # Fixed roll order (ivs, nature, gender, ability) so that
-                # tests with a fake RNG are stable across changes here.
-                ivs = roll_ivs(self._random)
-                nature = roll_nature(self._random)
-                gender = gender_from_roll(command.gender_rate, self._random.random())
-                ability = roll_ability(command.abilities, self._random)
-                capture_id = self._capture_repository.insert(
-                    connection,
-                    species=str(encounter["species"]),
-                    form=str(encounter["form"]),
-                    shiny=bool(encounter["shiny"]),
-                    caught_at=command.caught_at,
-                    ball_slug=command.ball_slug,
-                    level=level,
-                    experience=experience_for_level(command.growth_rate, level),
-                    ivs=ivs,
-                    nature=nature.name,
-                    gender=gender,
-                    ability=ability,
-                )
-                connection.commit()
-                return CaptureResult(CaptureStatus.CAUGHT, chance=chance, capture_id=capture_id)
-
-            escape_after = int(encounter.get("escape_after_attempts") or 0)
-            if escape_after <= 0:
-                escape_after = self._escape_after_attempts(command, encounter)
-            attempts = int(encounter.get("failed_capture_attempts") or 0) + 1
-            # Las rocas y los cebos ya han gastado turnos de la misma paciencia.
-            spent = attempts + max(0, int(encounter.get("item_turns") or 0))
-            if spent >= escape_after:
-                self._encounter_repository.clear_in_transaction(connection)
-                status = CaptureStatus.FLED
-            else:
-                encounter["failed_capture_attempts"] = attempts
-                encounter["escape_after_attempts"] = escape_after
-                self._encounter_repository.save_in_transaction(connection, encounter)
-                status = CaptureStatus.FAILED
+            result = self.attempt_in_transaction(connection, command)
             connection.commit()
-            return CaptureResult(
-                status,
-                chance=chance,
-                attempts=attempts,
-                escape_after=escape_after,
-                remaining_turns=max(0, escape_after - spent),
-            )
+            return result
         except BaseException:
             connection.rollback()
             raise
         finally:
             connection.close()
+
+    def attempt_in_transaction(
+        self, connection: sqlite3.Connection, command: CaptureCommand
+    ) -> CaptureResult:
+        """Intenta la captura dentro de la transacción que ya abrió quien llama.
+
+        No abre, confirma, deshace ni cierra nada: así el combate captura y
+        guarda su turno de forma atómica. ``execute`` es el envoltorio que
+        posee su propia transacción.
+        """
+        inventory = self._inventory_repository.load_in_transaction(
+            connection, self._inventory_normaliser
+        )
+        encounter = self._encounter_repository.load_in_transaction(connection)
+        if encounter is None:
+            return CaptureResult(CaptureStatus.NO_ENCOUNTER)
+        if bool(encounter["captured"]):
+            return CaptureResult(CaptureStatus.ALREADY_CAPTURED)
+
+        if command.ball_slug != "pokeball":
+            stock = max(0, int(inventory["balls"].get(command.ball_slug, 0)))
+            if stock == 0:
+                return CaptureResult(CaptureStatus.NO_STOCK)
+            inventory["balls"][command.ball_slug] = stock - 1
+
+        level = max(
+            STARTING_LEVEL,
+            int(command.encounter_level),
+            50 if command.is_legendary else STARTING_LEVEL,
+        )
+        chance = catch_chance(
+            command.capture_rate,
+            is_legendary=command.is_legendary,
+            is_mythical=command.is_mythical,
+            shiny=bool(encounter["shiny"]),
+            ball_multiplier=command.ball_multiplier,
+            level=level,
+            mood_multiplier=catch_stage_multiplier(int(encounter.get("catch_stage") or 0)),
+            battle_multiplier=command.battle_multiplier,
+        )
+        caught = self._random.random() < chance
+        self._inventory_repository.save_in_transaction(connection, inventory)
+        if caught:
+            encounter["captured"] = True
+            self._encounter_repository.save_in_transaction(connection, encounter)
+            individual = (
+                command.individual
+                if command.individual is not None
+                else self._roll_individual(command, level)
+            )
+            capture_id = self._capture_repository.insert(
+                connection,
+                species=str(encounter["species"]),
+                form=str(encounter["form"]),
+                shiny=bool(encounter["shiny"]),
+                caught_at=command.caught_at,
+                ball_slug=command.ball_slug,
+                level=individual.level,
+                experience=individual.experience,
+                ivs=individual.ivs,
+                nature=individual.nature,
+                gender=individual.gender,
+                ability=individual.ability,
+            )
+            return CaptureResult(CaptureStatus.CAUGHT, chance=chance, capture_id=capture_id)
+
+        escape_after = int(encounter.get("escape_after_attempts") or 0)
+        if escape_after <= 0:
+            escape_after = self._escape_after_attempts(command, encounter)
+        attempts = int(encounter.get("failed_capture_attempts") or 0) + 1
+        # Las rocas y los cebos ya han gastado turnos de la misma paciencia.
+        spent = attempts + max(0, int(encounter.get("item_turns") or 0))
+        if spent >= escape_after:
+            self._encounter_repository.clear_in_transaction(connection)
+            status = CaptureStatus.FLED
+        else:
+            encounter["failed_capture_attempts"] = attempts
+            encounter["escape_after_attempts"] = escape_after
+            self._encounter_repository.save_in_transaction(connection, encounter)
+            status = CaptureStatus.FAILED
+        return CaptureResult(
+            status,
+            chance=chance,
+            attempts=attempts,
+            escape_after=escape_after,
+            remaining_turns=max(0, escape_after - spent),
+        )
+
+    def _roll_individual(self, command: CaptureCommand, level: int) -> CapturedIndividual:
+        # Fixed roll order (ivs, nature, gender, ability) so that
+        # tests with a fake RNG are stable across changes here.
+        ivs = roll_ivs(self._random)
+        nature = roll_nature(self._random)
+        gender = gender_from_roll(command.gender_rate, self._random.random())
+        ability = roll_ability(command.abilities, self._random)
+        return CapturedIndividual(
+            level=level,
+            ivs=ivs,
+            nature=nature.name,
+            gender=gender,
+            ability=ability,
+            experience=experience_for_level(command.growth_rate, level),
+        )
 
     def _escape_after_attempts(self, command: CaptureCommand, encounter: Encounter) -> int:
         return escape_after_attempts(

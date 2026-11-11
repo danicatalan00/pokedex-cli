@@ -19,6 +19,13 @@ _pokedex_capture_ids() {
   _describe -t ids 'id de captura' ids
 }
 
+_pokedex_fighters() {
+  # Un luchador de exhibición es una captura (por id) o una especie.
+  _alternative \
+    'ids:id de captura:_pokedex_capture_ids' \
+    'pokemon:especie:_pokedex_pokemon_names'
+}
+
 _pokedex() {
   local curcontext="$curcontext" state line
   typeset -A opt_args
@@ -34,6 +41,9 @@ _pokedex() {
     'search:ficha de cualquier Pokémon o forma'
     'vision:vista enriquecida de un Pokémon capturado (sprite + ficha)'
     'equipo:ve o gestiona tu equipo (máx. 6)'
+    'combate:combate por turnos contra el Pokémon que espera (o un entrenador)'
+    'demo-combate:exhibición de combate sin guardar nada'
+    'movimientos:ve y elige los 4 movimientos de una captura'
     'tipos:desglose de tus capturas por tipo'
     'ranking:ranking por suma de stats base'
     'legendarios:tu salón de la fama de legendarios'
@@ -113,6 +123,28 @@ _pokedex() {
             '--speed[factor de duración]:factor:(0.7 1.0 1.4)' \
             '1:origen:_pokedex_pokemon_names' \
             '2:destino:_pokedex_pokemon_names'
+          ;;
+        combate|batalla)
+          _arguments \
+            '(-e --entrenador)'{-e,--entrenador}'[lucha contra un entrenador generado]' \
+            '--auto[la IA elige tus órdenes]' \
+            '--velocidad[multiplica las pausas (0 instantáneo)]:factor:(0 0.5 1 2)' \
+            '--debug[muestra el daño y la probabilidad de captura]'
+          ;;
+        demo-combate)
+          _arguments \
+            '(-n --nivel)'{-n,--nivel}'[nivel de los dos luchadores 1-100]:nivel:' \
+            '--auto[la IA elige tus órdenes]' \
+            '--velocidad[multiplica las pausas (0 instantáneo)]:factor:(0 0.5 1 2)' \
+            '--debug[muestra el daño de cada golpe]' \
+            '1:tu luchador (captura o especie):_pokedex_fighters' \
+            '2:rival (captura o especie):_pokedex_fighters'
+          ;;
+        movimientos)
+          _arguments \
+            '(--auto)--set[fija un moveset propio, separado por comas]:movimientos:' \
+            '(--set)--auto[vuelve al moveset automático]' \
+            '1:captura:_pokedex_capture_ids'
           ;;
         equipo)
           if (( CURRENT == 2 )); then

@@ -8,7 +8,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from pokedex_cli import cli, inventory, storage
+
+
+@pytest.fixture(autouse=True)
+def no_battle_in_progress(monkeypatch):
+    """Capturar, ver y el hook consultan si hay un combate salvaje en pausa: aquí
+    nunca lo hay (y así ningún test abre la BD del HOME real)."""
+    monkeypatch.setattr(cli.composition, "active_wild_battle_name", lambda: None)
 
 
 class BallSelectionTests(unittest.TestCase):

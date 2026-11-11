@@ -1,5 +1,6 @@
 import math
 import random
+import sys
 
 import pytest
 from hypothesis import given
@@ -76,6 +77,77 @@ def test_mood_multiplier_scales_the_probability_but_not_the_masterball() -> None
     assert catch_chance(200, mood_multiplier=2.0) == 1.0
     assert catch_chance(1, ball_multiplier=255, mood_multiplier=0.125) == 1.0
     assert catch_chance(100) == catch_chance(100, mood_multiplier=1.0)
+
+
+@pytest.mark.parametrize("ball_multiplier", [1.0, 255.0])
+@pytest.mark.parametrize(
+    ("multiplier", "error"),
+    [
+        (-1.0, ValueError),
+        (-0.001, ValueError),
+        (math.inf, ValueError),
+        (math.nan, ValueError),
+        (True, TypeError),
+        ("2", TypeError),
+        (None, TypeError),
+    ],
+)
+def test_invalid_battle_multipliers_are_rejected_even_with_the_masterball(
+    ball_multiplier: float, multiplier: object, error: type[Exception]
+) -> None:
+    """Se valida como el ánimo: antes del atajo de la Masterball, para que un
+    dato corrupto del combate no pase desapercibido con la bola infalible."""
+    with pytest.raises(error, match=r"^battle_multiplier must"):
+        catch_chance(100, ball_multiplier=ball_multiplier, battle_multiplier=multiplier)
+
+
+def test_battle_multiplier_scales_the_probability_but_not_the_masterball() -> None:
+    """Debilitar o dormir al salvaje es otro factor más; la Masterball se
+    resuelve antes, así que ni un factor nulo la hace fallar."""
+    assert catch_chance(30, battle_multiplier=2.0) == pytest.approx(60 / 255)
+    assert catch_chance(30, battle_multiplier=0.5) == pytest.approx(15 / 255)
+    assert catch_chance(30, battle_multiplier=0.0) == 0.0
+    assert catch_chance(100, battle_multiplier=3.0) == 1.0
+    assert catch_chance(1, ball_multiplier=255, battle_multiplier=0.0) == 1.0
+    assert catch_chance(100) == catch_chance(100, battle_multiplier=1.0)
+
+
+def test_a_null_battle_multiplier_never_becomes_a_sure_catch() -> None:
+    """Un ánimo enorme pero finito pasa la validación y desborda el producto a
+    infinito; por un factor de combate nulo daría NaN, y acotar NaN devolvía
+    una captura segura. El producto exacto es 0."""
+    huge = sys.float_info.max
+
+    assert catch_chance(255, level=1, mood_multiplier=huge, battle_multiplier=0.0) == 0.0
+    assert (
+        catch_chance(255, ball_multiplier=254.0, mood_multiplier=1e306, battle_multiplier=0.0)
+        == 0.0
+    )
+
+
+def test_battle_multiplier_composes_with_ball_level_and_mood() -> None:
+    chance = catch_chance(
+        10, ball_multiplier=1.5, level=20, mood_multiplier=2.0, battle_multiplier=3.0
+    )
+
+    assert chance == pytest.approx((10 / 255) * 1.5 * math.sqrt(5 / 20) * 2.0 * 3.0)
+
+
+@given(
+    capture_rate=st.one_of(st.none(), st.integers(min_value=0, max_value=255)),
+    ball=st.floats(min_value=0, max_value=300, allow_nan=False, allow_infinity=False),
+    first=st.floats(min_value=0, max_value=6, allow_nan=False, allow_infinity=False),
+    second=st.floats(min_value=0, max_value=6, allow_nan=False, allow_infinity=False),
+)
+def test_a_weaker_wild_pokemon_is_never_harder_to_catch(
+    capture_rate: int | None, ball: float, first: float, second: float
+) -> None:
+    low, high = sorted((first, second))
+
+    weaker = catch_chance(capture_rate, ball_multiplier=ball, battle_multiplier=high)
+    healthier = catch_chance(capture_rate, ball_multiplier=ball, battle_multiplier=low)
+
+    assert 0.0 <= healthier <= weaker <= 1.0
 
 
 def test_masterball_sentinel_and_upper_clamp() -> None:

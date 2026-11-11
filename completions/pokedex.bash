@@ -54,6 +54,9 @@ _pokedex_options() {
             ;;
         demo-vision) printf '%s' '-n --nivel -s --shiny -f --form --seed' ;;
         demo-evolucion) printf '%s' '-s --shiny --form-origen --form-destino --speed' ;;
+        combate|batalla) printf '%s' '-e --entrenador --auto --velocidad --debug' ;;
+        demo-combate) printf '%s' '-n --nivel --auto --velocidad --debug' ;;
+        movimientos) printf '%s' '--set --auto' ;;
     esac
 }
 
@@ -62,7 +65,7 @@ _pokedex() {
     local cur prev command word i positional
     local -a options_with_value=(
         -b --bola -f --form -g --generations -r --result -a --accion
-        -n --nivel --seed --speed --form-origen --form-destino
+        -n --nivel --seed --speed --form-origen --form-destino --velocidad --set
     )
     local command_index=0
 
@@ -92,8 +95,8 @@ _pokedex() {
 
     if [[ -z $command ]]; then
         _pokedex_offer ver capturar roca cebo bolsas list search vision equipo \
-            tipos ranking legendarios refresh demo demo-vision demo-evolucion \
-            completion hook -h --help
+            combate demo-combate movimientos tipos ranking legendarios refresh \
+            demo demo-vision demo-evolucion completion hook -h --help
         return 0
     fi
 
@@ -114,7 +117,11 @@ _pokedex() {
             _pokedex_offer 0.7 1.0 1.4
             return 0
             ;;
-        -f | --form | --form-origen | --form-destino | -g | --generations | -n | --nivel | --seed)
+        --velocidad)
+            _pokedex_offer 0 0.5 1 2
+            return 0
+            ;;
+        -f | --form | --form-origen | --form-destino | -g | --generations | -n | --nivel | --seed | --set)
             # Texto libre: mejor no proponer nada que proponer ficheros.
             return 0
             ;;
@@ -147,8 +154,13 @@ _pokedex() {
         demo-evolucion)
             ((positional <= 1)) && _pokedex_offer_lines "$(_pokedex_pokemon_names)"
             ;;
-        vision)
+        vision | movimientos)
             ((positional == 0)) && _pokedex_offer_lines "$(_pokedex_capture_ids)"
+            ;;
+        demo-combate)
+            # Cada luchador es una captura (por id) o una especie.
+            ((positional <= 1)) && _pokedex_offer_lines "$(_pokedex_capture_ids)
+$(_pokedex_pokemon_names)"
             ;;
         equipo)
             if ((positional == 0)); then

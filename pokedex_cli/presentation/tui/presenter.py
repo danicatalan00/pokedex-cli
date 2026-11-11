@@ -179,7 +179,7 @@ def filter_entries(
     """Substring name match (case/accent-insensitive) or exact dex number,
     combined with an optional status and generation filter."""
     query = query.strip()
-    is_dex_number = query.isdigit()
+    is_dex_number = query.isdecimal()
     folded_query = _fold(query)
     result: list[CatalogEntry] = []
     for entry in entries:

@@ -54,6 +54,11 @@ def test_filter_by_dex_number_matches_the_exact_idx():
     assert presenter.filter_entries(ENTRIES, "999", None, None) == []
 
 
+def test_superscript_digits_are_searched_as_text_not_as_dex_numbers():
+    """«²» pasa ``str.isdigit`` pero ``int("²")`` lanza: no debe tumbar la TUI."""
+    assert presenter.filter_entries(ENTRIES, "²", None, None) == []
+
+
 def test_filter_by_status():
     assert [e.slug for e in presenter.filter_entries(ENTRIES, "", "captured", None)] == [
         "bulbasaur"

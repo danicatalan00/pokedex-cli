@@ -1,3 +1,5 @@
+import pytest
+
 from pokedex_cli.application.collection import CollectionQueries
 from pokedex_cli.domain.individuality import STAT_KEYS, compute_stats, derive_ivs_nature
 
@@ -87,6 +89,12 @@ def test_resolve_supports_id_latest_name_and_form():
     assert service.resolve("RAICHU", None)["id"] == 3
     assert service.resolve("raichu", "alola")["id"] == 1
     assert service.resolve("missing", None) is None
+
+
+@pytest.mark.parametrize("identifier", ["?", "#", "²", "¹²"])
+def test_resolve_treats_identifiers_without_a_match_as_missing(identifier):
+    """«²» pasa ``str.isdigit`` pero no ``int``; «?» no deja nombre que buscar."""
+    assert queries().resolve(identifier, None) is None
 
 
 def test_resolve_normalizes_user_facing_species_and_form():

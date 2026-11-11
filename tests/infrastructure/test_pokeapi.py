@@ -107,6 +107,129 @@ def test_missing_gender_rate_and_abilities_default_to_none_and_empty() -> None:
 
     assert result["gender_rate"] is None
     assert result["abilities"] == []
+    # Sin ``moves`` el learnset queda vacío pero presente: ya se consultó.
+    assert result["level_moves"] == []
+    assert result["moves_version_group"] is None
+
+
+def test_success_includes_level_up_learnset_without_extra_requests() -> None:
+    def level_up(slug: str, level: int, group: str = "emerald") -> dict:
+        return {
+            "move": {"name": slug},
+            "version_group_details": [
+                {
+                    "level_learned_at": level,
+                    "move_learn_method": {"name": "level-up"},
+                    "order": None,
+                    "version_group": {"name": group},
+                }
+            ],
+        }
+
+    pokemon = pokemon_payload()
+    pokemon["moves"] = [
+        level_up("thunder-shock", 1),
+        level_up("growl", 1),
+        level_up("thunder-wave", 8),
+        level_up("quick-attack", 11),
+        level_up("thunderbolt", 26, group="scarlet-violet"),
+    ]
+    session = FakeSession([FakeResponse(200, species_payload()), FakeResponse(200, pokemon)])
+
+    result = PokeApiClient(session=session).fetch_species_data("pikachu", "regular")
+
+    assert result["moves_version_group"] == "emerald"
+    assert result["level_moves"] == [
+        ["thunder-shock", 1],
+        ["growl", 1],
+        ["thunder-wave", 8],
+        ["quick-attack", 11],
+    ]
+    assert len(session.calls) == 2
+
+
+def level_up_move(slug: str, level: int, group: str) -> dict:
+    return {
+        "move": {"name": slug},
+        "version_group_details": [
+            {
+                "level_learned_at": level,
+                "move_learn_method": {"name": "level-up"},
+                "order": None,
+                "version_group": {"name": group},
+            }
+        ],
+    }
+
+
+def form_species_payload(species: str, form: str) -> dict:
+    payload = species_payload()
+    payload["varieties"] = [
+        {"is_default": True, "pokemon": {"name": species}},
+        {"is_default": False, "pokemon": {"name": f"{species}-{form}"}},
+    ]
+    return payload
+
+
+def test_form_without_moves_borrows_the_learnset_of_the_default_variety() -> None:
+    # PokeAPI deja las formas Gigamax con ``moves: []`` (pikachu-gmax,
+    # charizard-gmax…), aunque en el juego conservan los de la especie.
+    # Guardar «[]» sería «ya consultado, sin learnset»: el combate tiraría de
+    # los movimientos de reserva para siempre.
+    gmax = {**pokemon_payload(), "moves": []}
+    regular = pokemon_payload()
+    regular["moves"] = [
+        level_up_move("thunder-shock", 1, "emerald"),
+        level_up_move("growl", 1, "emerald"),
+        level_up_move("thunder-wave", 8, "emerald"),
+        level_up_move("quick-attack", 11, "emerald"),
+    ]
+    session = FakeSession(
+        [
+            FakeResponse(200, form_species_payload("pikachu", "gmax")),
+            FakeResponse(200, gmax),  # la variedad de la forma existe
+            FakeResponse(200, gmax),
+            FakeResponse(200, regular),
+        ]
+    )
+
+    result = PokeApiClient(session=session).fetch_species_data("pikachu", "gmax")
+
+    assert result["form_data_exact"] is True
+    assert result["moves_version_group"] == "emerald"
+    assert result["level_moves"] == [
+        ["thunder-shock", 1],
+        ["growl", 1],
+        ["thunder-wave", 8],
+        ["quick-attack", 11],
+    ]
+    assert session.calls[-1][0] == "https://pokeapi.co/api/v2/pokemon/pikachu"
+
+
+def test_form_with_its_own_moves_keeps_them_without_extra_requests() -> None:
+    alola = pokemon_payload()
+    alola["moves"] = [
+        level_up_move(slug, 1, "ultra-sun-ultra-moon")
+        for slug in ("psychic", "speed-swap", "thunder-shock", "tail-whip")
+    ]
+    session = FakeSession(
+        [
+            FakeResponse(200, form_species_payload("raichu", "alola")),
+            FakeResponse(200, alola),
+            FakeResponse(200, alola),
+        ]
+    )
+
+    result = PokeApiClient(session=session).fetch_species_data("raichu", "alola")
+
+    assert result["moves_version_group"] == "ultra-sun-ultra-moon"
+    assert [slug for slug, _ in result["level_moves"]] == [
+        "psychic",
+        "speed-swap",
+        "thunder-shock",
+        "tail-whip",
+    ]
+    assert len(session.calls) == 3
 
 
 def test_success_uses_injected_session_and_explicit_timeout() -> None:

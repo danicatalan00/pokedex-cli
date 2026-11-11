@@ -8,6 +8,13 @@ from pokedex_cli import cli, inventory, storage
 from pokedex_cli.application.encounter import EncounterStatus
 
 
+@pytest.fixture(autouse=True)
+def no_battle_in_progress(monkeypatch):
+    """Capturar, ver, roca y cebo consultan si hay un combate salvaje en pausa:
+    aquí nunca lo hay (y así ningún test abre la BD del HOME real)."""
+    monkeypatch.setattr(cli.composition, "active_wild_battle_name", lambda: None)
+
+
 def state():
     return inventory._new_inventory(datetime(2026, 7, 15, 10, tzinfo=timezone.utc))
 
@@ -487,6 +494,19 @@ def test_team_validates_remove_and_add_identifiers(connection, monkeypatch, caps
         cli.team_application.TeamAction.ADD,
         capture_id,
     )
+
+
+@pytest.mark.parametrize("identifier", ["?", "²"])
+def test_team_selector_reports_names_that_match_nothing(monkeypatch, capsys, identifier):
+    queries = MagicMock()
+    queries.available_for_team.return_value = []
+    monkeypatch.setattr(cli, "_collection_queries", lambda: queries)
+    use_case = MagicMock()
+    monkeypatch.setattr(cli, "_manage_team_use_case", lambda: use_case)
+
+    assert cli.cmd_equipo(argparse.Namespace(accion="add", id=identifier)) == 0
+    assert "No tienes ninguna captura" in _flat(capsys.readouterr().out)
+    use_case.execute.assert_not_called()
 
 
 @pytest.mark.parametrize("action", ["add", "remove"])

@@ -24,6 +24,27 @@ test nuevo debe conservar esas fronteras.
 Prefiere el test más bajo que pueda demostrar el riesgo. Usa Hypothesis para
 invariantes y bases temporales reales para transacciones o migraciones.
 
+## Tests del combate
+
+- **Dominio:** `tests/domain/battle/`, con cifras exactas de las reglas, el
+  motor con azar guionizado y combates IA contra IA con Hypothesis.
+- **Aplicación:** `tests/application/test_battle.py` con dobles,
+  `test_battle_sqlite.py` con SQLite temporal y repositorios reales,
+  `test_moves.py`, `test_movesets.py` y los casos de combate de
+  `test_capture.py` y `test_hook.py`.
+- **Infraestructura:** `tests/infrastructure/test_battle_repositories.py`,
+  `test_learnsets.py` y `test_pokeapi_moves.py` (recortes de payloads reales),
+  más los casos de combate de `test_pokeapi.py`, `test_species_cache.py` y
+  `test_database.py` (migraciones).
+- **Presentación:** `tests/presentation/test_battle_text.py`,
+  `test_battle_scene.py`, `test_battle_director.py` y `test_tui_battle.py`
+  (Pilot de Textual con sesiones guionizadas).
+- **CLI/E2E:** `tests/test_cli_battle.py` (consola de Rich en memoria, teclado
+  guionizado y un pseudoterminal para el teclado real) y los combates de
+  `tests/test_cli_e2e.py`, que siembran especies y movimientos en una base
+  temporal; los de la reserva offline desvían HTTP a un proxy local
+  inalcanzable.
+
 ## Ciclo de trabajo
 
 1. Escribe una prueba que falle por la conducta esperada.

@@ -1,4 +1,5 @@
 import re
+import sys
 from collections.abc import Callable
 from typing import Any
 
@@ -15,6 +16,53 @@ STAT_NAME_MAP = {
     "special-defense": "spd",
     "speed": "spe",
 }
+# Stats que un movimiento puede subir o bajar, con las claves de escalón del
+# dominio (``domain.battle.model.STAGE_KEYS``).
+STAGE_NAME_MAP = {
+    "attack": "atk",
+    "defense": "def",
+    "special-attack": "spa",
+    "special-defense": "spd",
+    "speed": "spe",
+    "accuracy": "accuracy",
+    "evasion": "evasion",
+}
+
+# Grupo de versión del learnset por nivel, «clásica primero»: los learnsets de
+# Gen 3 casan con las reglas del combate. Si ninguno de estos tiene al menos
+# MIN_LEARNSET_MOVES movimientos, gana el grupo con más (sea cual sea).
+LEARNSET_VERSION_PREFERENCE: tuple[str, ...] = (
+    "emerald",
+    "firered-leafgreen",
+    "ruby-sapphire",
+    "platinum",
+    "heartgold-soulsilver",
+    "diamond-pearl",
+    "black-2-white-2",
+    "black-white",
+    "omega-ruby-alpha-sapphire",
+    "x-y",
+    "ultra-sun-ultra-moon",
+    "sun-moon",
+    "sword-shield",
+    "scarlet-violet",
+    "brilliant-diamond-shining-pearl",
+    "legends-arceus",
+    "crystal",
+    "gold-silver",
+    "yellow",
+    "red-blue",
+    "lets-go-pikachu-lets-go-eevee",
+)
+MIN_LEARNSET_MOVES = 4
+
+# Texto con el que PokeAPI rellena los movimientos retirados en Espada/Escudo:
+# no describe el movimiento, así que se salta como si no existiera.
+UNUSABLE_MOVE_TEXTS = (
+    "este movimiento no se puede usar",
+    "this move can’t be used",
+    "this move can't be used",
+)
 
 JsonObject = dict[str, Any]
 JsonFetcher = Callable[[str], JsonObject | None]
@@ -292,6 +340,151 @@ def _encounter_level(
     if depth == 1 and has_later_stage:
         return 20
     return 36 if depth >= 2 else 30
+
+
+def _strict_int(value: object) -> int | None:
+    """Entero JSON de verdad: ``True`` o ``"5"`` no cuentan como números."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _one_line(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return " ".join(value.split()) or None
+
+
+def _level_up_learnset(pokemon_json: JsonObject) -> tuple[str | None, list[list[object]]]:
+    """Learnset por nivel del grupo de versión preferido: ``(grupo, [[slug, nivel], …])``.
+
+    Ordena por nivel; el 0 (se aprende al evolucionar) cuenta como 1. Dentro
+    de un nivel manda el ``order`` de PokeAPI y después la posición en el
+    payload, así que los de evolución, que no traen ``order``, quedan detrás
+    de los básicos. Conserva las repeticiones: el dominio se queda con la
+    última aparición de cada movimiento.
+    """
+    groups: dict[str, list[tuple[int, int, int, str]]] = {}
+    for index, entry in enumerate(pokemon_json.get("moves") or []):
+        if not isinstance(entry, dict):
+            continue
+        slug = _resource_name(entry.get("move"))
+        if slug is None:
+            continue
+        for detail in entry.get("version_group_details") or []:
+            if not isinstance(detail, dict):
+                continue
+            if _resource_name(detail.get("move_learn_method")) != "level-up":
+                continue
+            group = _resource_name(detail.get("version_group"))
+            level = _strict_int(detail.get("level_learned_at"))
+            if group is None or level is None or level < 0:
+                continue
+            order = _strict_int(detail.get("order"))
+            groups.setdefault(group, []).append(
+                (max(1, level), sys.maxsize if order is None else order, index, slug)
+            )
+    if not groups:
+        return None, []
+
+    def size(group: str) -> int:
+        return len({slug for *_, slug in groups[group]})
+
+    chosen = next(
+        (
+            group
+            for group in LEARNSET_VERSION_PREFERENCE
+            if group in groups and size(group) >= MIN_LEARNSET_MOVES
+        ),
+        None,
+    )
+    if chosen is None:
+        rank = {group: position for position, group in enumerate(LEARNSET_VERSION_PREFERENCE)}
+        chosen = min(groups, key=lambda group: (-size(group), rank.get(group, len(rank)), group))
+    return chosen, [[slug, level] for level, _, _, slug in sorted(groups[chosen])]
+
+
+def _localized_name(names: object) -> str | None:
+    entries = names if isinstance(names, list) else []
+    for lang in ("es", "en"):
+        for entry in entries:
+            if isinstance(entry, dict) and _resource_name(entry.get("language")) == lang:
+                name = _one_line(entry.get("name"))
+                if name:
+                    return name
+    return None
+
+
+def _move_description(move_json: JsonObject) -> str | None:
+    """Flavor text en español (en una línea), si no en inglés y si no el
+    ``short_effect`` inglés con su probabilidad ya sustituida."""
+    flavor_entries = move_json.get("flavor_text_entries")
+    entries = flavor_entries if isinstance(flavor_entries, list) else []
+    for lang in ("es", "en"):
+        for entry in entries:
+            if not isinstance(entry, dict) or _resource_name(entry.get("language")) != lang:
+                continue
+            text = _one_line(entry.get("flavor_text"))
+            if text and not text.lower().startswith(UNUSABLE_MOVE_TEXTS):
+                return text
+    effect_entries = move_json.get("effect_entries")
+    for entry in effect_entries if isinstance(effect_entries, list) else []:
+        if not isinstance(entry, dict) or _resource_name(entry.get("language")) != "en":
+            continue
+        text = _one_line(entry.get("short_effect"))
+        if text:
+            chance = _strict_int(move_json.get("effect_chance"))
+            return text if chance is None else text.replace("$effect_chance", str(chance))
+    return None
+
+
+def _stat_changes(raw: object) -> list[JsonObject]:
+    changes: list[JsonObject] = []
+    for entry in raw if isinstance(raw, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        stat = STAGE_NAME_MAP.get(_resource_name(entry.get("stat")) or "")
+        change = _strict_int(entry.get("change"))
+        if stat is not None and change is not None:
+            changes.append({"stat": stat, "change": change})
+    return changes
+
+
+def _move_record(move_json: JsonObject) -> JsonObject:
+    """Registro de caché de ``/move/{slug}`` con las claves exactas de ``Move``.
+
+    Solo traduce; la validación mínima (id, nombre, tipo y PP) es del cliente
+    y la de reglas, de ``domain.battle.moves.move_from_record``. Sin ``meta``
+    (p. ej. Arremetida) queda como movimiento de daño sin efectos añadidos.
+    """
+    raw_meta = move_json.get("meta")
+    meta: JsonObject = raw_meta if isinstance(raw_meta, dict) else {}
+    slug = _resource_name(move_json)
+    category = _resource_name(meta.get("category")) or "damage"
+    return {
+        "slug": slug,
+        "name": _localized_name(move_json.get("names")) or slug,
+        "type": _resource_name(move_json.get("type")),
+        "damage_class": _resource_name(move_json.get("damage_class")),
+        "power": _strict_int(move_json.get("power")),
+        "accuracy": _strict_int(move_json.get("accuracy")),
+        "pp": _strict_int(move_json.get("pp")),
+        "priority": _strict_int(move_json.get("priority")) or 0,
+        "target": _resource_name(move_json.get("target")) or "selected-pokemon",
+        # Versiones antiguas de PokeAPI escribían «damage+ailment».
+        "category": category.replace("+", "-"),
+        "ailment": _resource_name(meta.get("ailment")) or "none",
+        "ailment_chance": _strict_int(meta.get("ailment_chance")) or 0,
+        "min_hits": _strict_int(meta.get("min_hits")),
+        "max_hits": _strict_int(meta.get("max_hits")),
+        "min_turns": _strict_int(meta.get("min_turns")),
+        "max_turns": _strict_int(meta.get("max_turns")),
+        "drain": _strict_int(meta.get("drain")) or 0,
+        "healing": _strict_int(meta.get("healing")) or 0,
+        "crit_rate": _strict_int(meta.get("crit_rate")) or 0,
+        "flinch_chance": _strict_int(meta.get("flinch_chance")) or 0,
+        "stat_changes": _stat_changes(move_json.get("stat_changes")),
+        "stat_chance": _strict_int(meta.get("stat_chance")) or 0,
+        "description": _move_description(move_json),
+    }
 
 
 def fetch_species_data(species: str, form: str) -> JsonObject | None:

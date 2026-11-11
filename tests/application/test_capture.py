@@ -1,3 +1,5 @@
+import sqlite3
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -7,6 +9,7 @@ import pytest
 
 from pokedex_cli.application.capture import (
     CaptureCommand,
+    CapturedIndividual,
     CaptureEncounter,
     CaptureStatus,
 )
@@ -74,12 +77,13 @@ def build_use_case(
     *,
     rng: FixedRandom | None = None,
     capture_repository: SQLiteCaptureRepository | None = None,
+    connection_factory: Callable[[], sqlite3.Connection] | None = None,
 ) -> tuple[CaptureEncounter, SQLiteInventoryRepository, SQLiteEncounterRepository]:
     db_path = tmp_path / "pokedex.db"
     inventory_repository = SQLiteInventoryRepository(db_path, tmp_path / "inventory.json")
     encounter_repository = SQLiteEncounterRepository(db_path, tmp_path / "last_seen.json")
     use_case = CaptureEncounter(
-        connection_factory=lambda: database.connect(db_path),
+        connection_factory=connection_factory or (lambda: database.connect(db_path)),
         inventory_repository=inventory_repository,
         encounter_repository=encounter_repository,
         capture_repository=capture_repository or SQLiteCaptureRepository(),
@@ -475,3 +479,152 @@ def test_escape_threshold_uses_capture_speed_rarity_and_shiny_rules(
     )
 
     assert rng.requested_range == expected_range
+
+
+def caller_transaction(tmp_path: Path) -> sqlite3.Connection:
+    """Conexión con una transacción abierta por el llamante, como hará el combate."""
+    connection = database.connect(tmp_path / "pokedex.db")
+    connection.execute("BEGIN IMMEDIATE")
+    return connection
+
+
+def stored_ultraballs(inventory_repository: SQLiteInventoryRepository) -> int:
+    return int(
+        inventory_repository.update(normalise_inventory, lambda state: None)["balls"]["ultraball"]
+    )
+
+
+def count_captures(tmp_path: Path) -> int:
+    connection = database.connect(tmp_path / "pokedex.db")
+    try:
+        return int(connection.execute("SELECT COUNT(*) FROM captures").fetchone()[0])
+    finally:
+        connection.close()
+
+
+def test_attempt_in_transaction_leaves_commit_rollback_and_close_to_the_caller(
+    tmp_path: Path,
+) -> None:
+    use_case, inventory_repository, encounter_repository = build_use_case(tmp_path)
+    seed(inventory_repository, encounter_repository)
+    connection = caller_transaction(tmp_path)
+    try:
+        result = use_case.attempt_in_transaction(connection, command())
+
+        # Ni confirma ni cierra: el combate aún tiene que guardar su turno.
+        assert result.status is CaptureStatus.CAUGHT
+        assert connection.in_transaction
+        assert connection.execute("SELECT COUNT(*) FROM captures").fetchone()[0] == 1
+        connection.rollback()
+    finally:
+        connection.close()
+
+    # Si el turno falla después, deshacerlo deshace también la captura entera.
+    assert count_captures(tmp_path) == 0
+    assert stored_ultraballs(inventory_repository) == 1
+    assert encounter_repository.read()["captured"] is False
+
+
+def test_attempt_in_transaction_propagates_failures_without_rolling_back(
+    tmp_path: Path,
+) -> None:
+    class FailingCaptureRepository(SQLiteCaptureRepository):
+        def insert(self, *args, **kwargs):
+            raise RuntimeError("disk failure")
+
+    use_case, inventory_repository, encounter_repository = build_use_case(
+        tmp_path, capture_repository=FailingCaptureRepository()
+    )
+    seed(inventory_repository, encounter_repository)
+    connection = caller_transaction(tmp_path)
+    try:
+        with pytest.raises(RuntimeError, match="disk failure"):
+            use_case.attempt_in_transaction(connection, command())
+
+        # Deshacer le toca a quien abrió la transacción.
+        assert connection.in_transaction
+        connection.rollback()
+    finally:
+        connection.close()
+
+    assert stored_ultraballs(inventory_repository) == 1
+    assert encounter_repository.read()["captured"] is False
+
+
+def test_execute_commits_and_closes_the_connection_it_opens(tmp_path: Path) -> None:
+    opened: list[sqlite3.Connection] = []
+
+    def connect() -> sqlite3.Connection:
+        opened.append(database.connect(tmp_path / "pokedex.db"))
+        return opened[-1]
+
+    use_case, inventory_repository, encounter_repository = build_use_case(
+        tmp_path, connection_factory=connect
+    )
+    seed(inventory_repository, encounter_repository)
+
+    result = use_case.execute(command())
+
+    assert result.status is CaptureStatus.CAUGHT
+    assert len(opened) == 1
+    with pytest.raises(sqlite3.ProgrammingError):
+        opened[0].execute("SELECT 1")
+    assert count_captures(tmp_path) == 1
+    assert encounter_repository.read()["captured"] is True
+
+
+def test_the_battle_multiplier_scales_the_chance_on_top_of_the_safari_mood(
+    tmp_path: Path,
+) -> None:
+    use_case, inventory_repository, encounter_repository = build_use_case(tmp_path)
+    inventory_repository.update(normalise_inventory, lambda state: None)
+    encounter_repository.write(encounter_state(catch_stage=1))
+
+    result = use_case.execute(
+        replace(command(), capture_rate=30, ball_multiplier=1.0, battle_multiplier=1.5)
+    )
+
+    assert result.chance == pytest.approx(30 * 2 * 1.5 / 255)
+
+
+def test_a_known_individual_is_inserted_as_is_without_rolling_dice(tmp_path: Path) -> None:
+    """El rival del combate ya tiene nivel, IV, naturaleza, sexo, habilidad y
+    EXP: la captura guarda ese individuo y solo tira el dado de la captura."""
+    rng = SequencedRandom(floats=[0.0], ints=[])
+    use_case, inventory_repository, encounter_repository = build_use_case(tmp_path, rng=rng)
+    seed(inventory_repository, encounter_repository)
+    individual = CapturedIndividual(
+        level=37,
+        ivs={"hp": 31, "atk": 0, "def": 15, "spa": 7, "spd": 22, "spe": 30},
+        nature="timid",
+        gender="female",
+        ability="lightning-rod",
+        experience=55_000,
+    )
+
+    result = use_case.execute(
+        replace(
+            command(),
+            capture_rate=30,
+            ball_multiplier=1.0,
+            gender_rate=4,
+            abilities=("static", "lightning-rod"),
+            individual=individual,
+        )
+    )
+
+    connection = database.connect(tmp_path / "pokedex.db")
+    try:
+        row = connection.execute(
+            "SELECT level, experience, iv_hp, iv_atk, iv_def, iv_spa, iv_spd, iv_spe, "
+            "nature, gender, ability FROM captures WHERE id = ?",
+            (result.capture_id,),
+        ).fetchone()
+    finally:
+        connection.close()
+    assert result.status is CaptureStatus.CAUGHT
+    assert (row["level"], row["experience"]) == (37, 55_000)
+    assert {key: row[f"iv_{key}"] for key in individual.ivs} == individual.ivs
+    assert (row["nature"], row["gender"], row["ability"]) == ("timid", "female", "lightning-rod")
+    # Conocer al individuo no cambia la probabilidad: sigue el nivel del encuentro.
+    assert result.chance == pytest.approx(30 / 255)

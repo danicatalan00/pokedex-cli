@@ -91,6 +91,12 @@ def _queue_evolution(
     )
 
 
+# Nombres públicos para otros adaptadores (el progreso tras un combate); los
+# privados siguen valiendo para los llamadores de siempre.
+cache_progression = _cache_progression
+queue_evolution = _queue_evolution
+
+
 def queue_current_evolution(
     conn: sqlite3.Connection, capture_id: int, rng: ChoiceSource | None = None
 ) -> None:

@@ -3,20 +3,26 @@
 from __future__ import annotations
 
 import json
+import random
 import sqlite3
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from pokedex_cli.application.evolutions import PendingEvolution
 from pokedex_cli.application.individuality import IncompleteCapture
 from pokedex_cli.application.species import SpeciesIdentity
 from pokedex_cli.application.training import TeamMember
+from pokedex_cli.domain.battle.model import MAX_MOVES, BattleKind, Outcome
 from pokedex_cli.domain.evolutions import EvolutionOption
 from pokedex_cli.domain.models import Encounter as EncounterModel
+from pokedex_cli.domain.progression import MAX_LEVEL
 from pokedex_cli.infrastructure import database
+
+if TYPE_CHECKING:
+    from pokedex_cli.infrastructure.training import ChoiceSource
 
 Inventory = dict[str, Any]
 InventoryNormaliser = Callable[[object | None], Inventory]
@@ -386,6 +392,7 @@ class SQLiteSpeciesCacheRepository:
         data: dict[str, Any],
         fetched_at: str,
     ) -> None:
+        level_moves = data.get("level_moves")
         connection = database.connect(self.database_path)
         try:
             connection.execute(
@@ -397,14 +404,15 @@ class SQLiteSpeciesCacheRepository:
                      base_experience, encounter_level, level_evolutions, gender_rate, abilities,
                      height_dm, weight_hg, genus, habitat, color, shape, egg_groups,
                      base_happiness, hatch_counter, evolution_chain,
-                     fetched_at)
+                     level_moves, moves_version_group, fetched_at)
                 VALUES (:species, :form, :pokedex_id, :capture_rate, :types,
                         :hp, :atk, :def, :spa, :spd, :spe, :is_legendary, :is_mythical,
                         :generation, :flavor_text, :form_data_exact, :growth_rate,
                         :base_experience, :encounter_level, :level_evolutions,
                         :gender_rate, :abilities, :height_dm, :weight_hg, :genus,
                         :habitat, :color, :shape, :egg_groups, :base_happiness,
-                        :hatch_counter, :evolution_chain, :fetched_at)
+                        :hatch_counter, :evolution_chain, :level_moves,
+                        :moves_version_group, :fetched_at)
                 ON CONFLICT(species, form) DO UPDATE SET
                     pokedex_id=excluded.pokedex_id,
                     capture_rate=excluded.capture_rate,
@@ -436,6 +444,11 @@ class SQLiteSpeciesCacheRepository:
                     base_happiness=excluded.base_happiness,
                     hatch_counter=excluded.hatch_counter,
                     evolution_chain=excluded.evolution_chain,
+                    level_moves=CASE WHEN :has_level_moves
+                        THEN excluded.level_moves ELSE species_cache.level_moves END,
+                    moves_version_group=CASE WHEN :has_moves_version_group
+                        THEN excluded.moves_version_group
+                        ELSE species_cache.moves_version_group END,
                     fetched_at=excluded.fetched_at
                 """,
                 {
@@ -471,6 +484,12 @@ class SQLiteSpeciesCacheRepository:
                     "base_happiness": data.get("base_happiness"),
                     "hatch_counter": data.get("hatch_counter"),
                     "evolution_chain": json.dumps(data.get("evolution_chain", [])),
+                    # El learnset solo se escribe si el payload lo trae: un
+                    # perfil que no lo conoce no borra uno ya descargado.
+                    "level_moves": None if level_moves is None else json.dumps(level_moves),
+                    "has_level_moves": int("level_moves" in data),
+                    "moves_version_group": data.get("moves_version_group"),
+                    "has_moves_version_group": int("moves_version_group" in data),
                     "fetched_at": fetched_at,
                 },
             )
@@ -478,6 +497,30 @@ class SQLiteSpeciesCacheRepository:
         except BaseException:
             connection.rollback()
             raise
+        finally:
+            connection.close()
+
+    def battle_pool(self) -> list[dict[str, Any]]:
+        """Especies cacheadas con las seis stats base, candidatas para los
+        equipos de los entrenadores."""
+        connection = database.connect(self.database_path)
+        try:
+            rows = connection.execute(
+                "SELECT species, form, types, is_legendary, is_mythical FROM species_cache "
+                "WHERE hp IS NOT NULL AND atk IS NOT NULL AND def IS NOT NULL "
+                "AND spa IS NOT NULL AND spd IS NOT NULL AND spe IS NOT NULL "
+                "ORDER BY species, form"
+            ).fetchall()
+            return [
+                {
+                    "species": str(row["species"]),
+                    "form": str(row["form"]),
+                    "types": _decode_json_string_list(row["types"]),
+                    "is_legendary": bool(row["is_legendary"]),
+                    "is_mythical": bool(row["is_mythical"]),
+                }
+                for row in rows
+            ]
         finally:
             connection.close()
 
@@ -981,3 +1024,294 @@ class SQLiteIndividualityRepository:
     @staticmethod
     def update_ability(connection: sqlite3.Connection, capture_id: int, ability: str) -> None:
         connection.execute("UPDATE captures SET ability = ? WHERE id = ?", (ability, capture_id))
+
+
+# --- Modo combate -------------------------------------------------------------
+
+BATTLE_STATE_COLUMNS = ("kind", "state_json", "encounter_seen_at", "started_at", "updated_at")
+BATTLE_RECORD_COLUMNS = (
+    "wild_battles",
+    "wild_wins",
+    "wild_captures",
+    "trainer_wins",
+    "trainer_losses",
+    "streak",
+    "best_streak",
+    "last_battle_at",
+)
+# Solo se guardan los combates que cuentan; una exhibición nunca llega aquí.
+_RECORDED_KINDS = frozenset({BattleKind.WILD.value, BattleKind.TRAINER.value})
+_OUTCOMES = frozenset(outcome.value for outcome in Outcome)
+
+
+def _decode_json_object(payload: object) -> dict[str, Any] | None:
+    try:
+        parsed = json.loads(str(payload))
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+class SQLiteMoveCacheRepository:
+    """Caché de movimientos de PokeAPI: el registro JSON de cada slug.
+
+    Un registro ilegible cuenta como ausente: se volverá a descargar.
+    """
+
+    def __init__(self, database_path: Path) -> None:
+        self.database_path = database_path
+
+    def get(self, slug: str) -> dict[str, Any] | None:
+        return self.get_many([slug]).get(slug)
+
+    def get_many(self, slugs: Iterable[str]) -> dict[str, dict[str, Any]]:
+        """Los registros cacheados de ``slugs`` en una sola consulta."""
+        wanted = list(dict.fromkeys(slugs))
+        if not wanted:
+            return {}
+        placeholders = ", ".join("?" for _ in wanted)
+        connection = database.connect(self.database_path)
+        try:
+            rows = connection.execute(
+                f"SELECT slug, record FROM move_cache WHERE slug IN ({placeholders})",
+                wanted,
+            ).fetchall()
+        finally:
+            connection.close()
+        records: dict[str, dict[str, Any]] = {}
+        for slug, payload in rows:
+            record = _decode_json_object(payload)
+            if record is not None:
+                records[str(slug)] = record
+        return records
+
+    def put(self, slug: str, record: Mapping[str, Any], fetched_at: str) -> None:
+        connection = database.connect(self.database_path)
+        try:
+            connection.execute(
+                "INSERT INTO move_cache (slug, record, fetched_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(slug) DO UPDATE SET "
+                "record = excluded.record, fetched_at = excluded.fetched_at",
+                (slug, json.dumps(dict(record)), fetched_at),
+            )
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+
+def _validated_moveset(slugs: Sequence[str]) -> tuple[str, ...]:
+    moves = tuple(slugs)
+    if len(moves) > MAX_MOVES:
+        raise ValueError(f"a moveset holds at most {MAX_MOVES} moves")
+    if any(not isinstance(move, str) or not move for move in moves):
+        raise ValueError("move slugs must be non-empty text")
+    if len(set(moves)) != len(moves):
+        raise ValueError("a moveset cannot repeat a move")
+    return moves
+
+
+class SQLiteCaptureMovesRepository:
+    """Moveset elegido por el jugador para una captura; sin filas, automático."""
+
+    def __init__(self, database_path: Path) -> None:
+        self.database_path = database_path
+
+    def get(self, capture_id: int) -> tuple[str, ...]:
+        connection = database.connect(self.database_path)
+        try:
+            return self.get_in_transaction(connection, capture_id)
+        finally:
+            connection.close()
+
+    def replace(self, capture_id: int, slugs: Sequence[str]) -> None:
+        """Sustituye el moveset entero en su propia transacción (vacío = automático)."""
+        moves = _validated_moveset(slugs)
+        connection = database.connect(self.database_path)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self.replace_in_transaction(connection, capture_id, moves)
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    @staticmethod
+    def get_in_transaction(connection: sqlite3.Connection, capture_id: int) -> tuple[str, ...]:
+        rows = connection.execute(
+            "SELECT move FROM capture_moves WHERE capture_id = ? ORDER BY slot",
+            (capture_id,),
+        ).fetchall()
+        return tuple(str(row[0]) for row in rows)
+
+    @staticmethod
+    def replace_in_transaction(
+        connection: sqlite3.Connection, capture_id: int, slugs: Sequence[str]
+    ) -> None:
+        moves = _validated_moveset(slugs)
+        connection.execute("DELETE FROM capture_moves WHERE capture_id = ?", (capture_id,))
+        connection.executemany(
+            "INSERT INTO capture_moves (capture_id, slot, move) VALUES (?, ?, ?)",
+            [(capture_id, slot, move) for slot, move in enumerate(moves)],
+        )
+
+
+class SQLiteBattleRepository:
+    """El combate en curso, salvaje o contra entrenador; como mucho uno."""
+
+    def __init__(self, database_path: Path) -> None:
+        self.database_path = database_path
+
+    def read(self) -> dict[str, Any] | None:
+        connection = database.connect(self.database_path)
+        try:
+            return self.load_in_transaction(connection)
+        finally:
+            connection.close()
+
+    @staticmethod
+    def load_in_transaction(connection: sqlite3.Connection) -> dict[str, Any] | None:
+        row = connection.execute(
+            f"SELECT {', '.join(BATTLE_STATE_COLUMNS)} FROM battle_state WHERE singleton = 1"
+        ).fetchone()
+        return None if row is None else dict(zip(BATTLE_STATE_COLUMNS, row))
+
+    @staticmethod
+    def save_in_transaction(connection: sqlite3.Connection, row: Mapping[str, Any]) -> None:
+        connection.execute(
+            """
+            INSERT INTO battle_state (
+                singleton, kind, state_json, encounter_seen_at, started_at, updated_at
+            ) VALUES (1, :kind, :state_json, :encounter_seen_at, :started_at, :updated_at)
+            ON CONFLICT(singleton) DO UPDATE SET
+                kind = excluded.kind,
+                state_json = excluded.state_json,
+                encounter_seen_at = excluded.encounter_seen_at,
+                started_at = excluded.started_at,
+                updated_at = excluded.updated_at
+            """,
+            {
+                "kind": row["kind"],
+                "state_json": row["state_json"],
+                "encounter_seen_at": row.get("encounter_seen_at"),
+                "started_at": row["started_at"],
+                "updated_at": row["updated_at"],
+            },
+        )
+
+    @staticmethod
+    def clear_in_transaction(connection: sqlite3.Connection) -> None:
+        connection.execute("DELETE FROM battle_state")
+
+    def clear(self) -> None:
+        connection = database.connect(self.database_path)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self.clear_in_transaction(connection)
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+
+class SQLiteBattleRecordRepository:
+    """Récord acumulado de combates del jugador (una sola fila)."""
+
+    def __init__(self, database_path: Path) -> None:
+        self.database_path = database_path
+
+    def read(self) -> dict[str, Any]:
+        connection = database.connect(self.database_path)
+        try:
+            row = connection.execute(
+                f"SELECT {', '.join(BATTLE_RECORD_COLUMNS)} FROM battle_record WHERE singleton = 1"
+            ).fetchone()
+        finally:
+            connection.close()
+        if row is None:
+            return {column: 0 for column in BATTLE_RECORD_COLUMNS} | {"last_battle_at": None}
+        return dict(zip(BATTLE_RECORD_COLUMNS, row))
+
+    @staticmethod
+    def record_in_transaction(
+        connection: sqlite3.Connection, *, kind: str, outcome: str, at: str
+    ) -> None:
+        """Suma un combate terminado. Salvaje: cuenta el combate y, si acaba
+        así, la victoria o la captura. Entrenador: ganar alarga la racha y
+        perder la corta; las tablas solo actualizan la fecha."""
+        if kind not in _RECORDED_KINDS:
+            raise ValueError(f"unrecorded battle kind: {kind!r}")
+        if outcome not in _OUTCOMES:
+            raise ValueError(f"unknown battle outcome: {outcome!r}")
+        connection.execute("INSERT OR IGNORE INTO battle_record (singleton) VALUES (1)")
+        if kind == BattleKind.WILD.value:
+            connection.execute(
+                "UPDATE battle_record SET wild_battles = wild_battles + 1, "
+                "wild_wins = wild_wins + ?, wild_captures = wild_captures + ?, "
+                "last_battle_at = ? WHERE singleton = 1",
+                (int(outcome == Outcome.WON.value), int(outcome == Outcome.CAPTURED.value), at),
+            )
+        elif outcome == Outcome.WON.value:
+            # En un UPDATE cada expresión lee la fila anterior: streak + 1 es la nueva.
+            connection.execute(
+                "UPDATE battle_record SET trainer_wins = trainer_wins + 1, "
+                "streak = streak + 1, best_streak = MAX(best_streak, streak + 1), "
+                "last_battle_at = ? WHERE singleton = 1",
+                (at,),
+            )
+        elif outcome == Outcome.LOST.value:
+            connection.execute(
+                "UPDATE battle_record SET trainer_losses = trainer_losses + 1, streak = 0, "
+                "last_battle_at = ? WHERE singleton = 1",
+                (at,),
+            )
+        else:
+            connection.execute(
+                "UPDATE battle_record SET last_battle_at = ? WHERE singleton = 1", (at,)
+            )
+
+
+class SQLiteBattleProgressRepository:
+    """EXP y nivel ganados en combate, dentro de la transacción del turno."""
+
+    def __init__(self, rng: ChoiceSource | None = None) -> None:
+        self._rng: ChoiceSource = rng or random
+
+    def apply_experience_in_transaction(
+        self,
+        connection: sqlite3.Connection,
+        capture_id: int,
+        experience: int,
+        level: int,
+    ) -> bool:
+        """Guarda EXP y nivel de una captura y reencola su evolución por nivel.
+
+        No confirma nada: la transacción es del llamador. EXP y nivel nunca
+        bajan: si la captura avanzó por commits mientras el combate seguía
+        abierto, no retrocede. Para no perder ninguna de las dos ganancias, el
+        llamador debe sumar la EXP del combate a la que la captura tiene ahora.
+        Devuelve ``False`` si la captura ya no existe.
+        """
+        from pokedex_cli.infrastructure import training
+
+        if experience < 0:
+            raise ValueError("experience cannot be negative")
+        if not 1 <= level <= MAX_LEVEL:
+            raise ValueError(f"level must be between 1 and {MAX_LEVEL}")
+        updated = connection.execute(
+            "UPDATE captures SET experience = MAX(experience, ?), level = MAX(level, ?) "
+            "WHERE id = ?",
+            (experience, level, capture_id),
+        )
+        if updated.rowcount == 0:
+            return False
+        row = connection.execute("SELECT * FROM captures WHERE id = ?", (capture_id,)).fetchone()
+        _, _, evolutions = training.cache_progression(connection, row)
+        training.queue_evolution(connection, row, evolutions, self._rng)
+        return True

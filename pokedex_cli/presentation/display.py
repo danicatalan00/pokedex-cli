@@ -1,10 +1,17 @@
+from __future__ import annotations
+
 import json
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from rich import box
 from rich.console import Console, Group
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+
+if TYPE_CHECKING:
+    from pokedex_cli.domain.battle.model import Move
 
 MEDALS = ["🥇", "🥈", "🥉"]
 
@@ -244,10 +251,37 @@ stat_color_base = _stat_color
 gender_suffix = _gender_suffix
 
 
-def render_vision_card(console: Console, row: dict, sprite: str | None) -> None:
+def moves_block(moves: Sequence[Move], custom: bool) -> Group:
+    """Sección «Movimientos» de la ficha: nombre del color de su tipo y resumen
+    («Fuego · Especial · Pot 90 · Prec 100 · PP 15»)."""
+    from pokedex_cli.presentation.battle_text import move_summary
+
+    title = Text("Movimientos", style="bold grey85")
+    title.append(" · elegidos por ti" if custom else " · automáticos", style="grey54")
+    table = Table.grid(padding=(0, 2))
+    table.add_column(min_width=14)
+    table.add_column()
+    for move in moves:
+        table.add_row(
+            Text(move.name, style=f"bold {TYPE_COLORS.get(move.type, 'white')}"),
+            Text(f"{move_summary(move)} · PP {move.pp}", style="grey62"),
+        )
+    return Group(title, table)
+
+
+def render_vision_card(
+    console: Console,
+    row: dict,
+    sprite: str | None,
+    *,
+    moves: Sequence[Move] | None = None,
+    custom_moves: bool = False,
+) -> None:
     """Vista de detalle: sprite grande + ficha enriquecida, estilo pantalla
     de Pokédex. Las barras muestran las stats ACTUALES al nivel (fórmula
-    Gen 3); la info base (stat base + IV) queda visible en sutil."""
+    Gen 3); la info base (stat base + IV) queda visible en sutil. ``moves``
+    añade los movimientos con los que lucha (``custom_moves`` si los eligió
+    el jugador)."""
     species, form = row["species"], row["form"]
     name = display_name(species, form)
     types = row["types"] or []
@@ -315,6 +349,10 @@ def render_vision_card(console: Console, row: dict, sprite: str | None) -> None:
         blocks.append(
             Text("Sin datos enriquecidos todavía (se capturó sin conexión).", style="dim italic")
         )
+
+    # --- Movimientos ----------------------------------------------------------
+    if moves:
+        blocks.append(moves_block(moves, custom_moves))
 
     # --- Rareza -------------------------------------------------------------
     badges = []

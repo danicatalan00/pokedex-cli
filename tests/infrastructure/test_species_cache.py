@@ -76,6 +76,112 @@ def test_sqlite_species_cache_defaults_gender_rate_and_abilities_when_absent(tmp
     assert json.loads(cached["abilities"]) == []
 
 
+def test_learnset_is_stored_as_json_text_like_the_other_json_columns(tmp_path):
+    repository = SQLiteSpeciesCacheRepository(tmp_path / "pokedex.db")
+    data = payload()
+    data["level_moves"] = [["thunder-shock", 1], ["growl", 1], ["thunder-wave", 8]]
+    data["moves_version_group"] = "emerald"
+
+    repository.put("pikachu", "regular", data, "now")
+
+    cached = repository.get("pikachu", "regular")
+    assert json.loads(cached["level_moves"]) == [
+        ["thunder-shock", 1],
+        ["growl", 1],
+        ["thunder-wave", 8],
+    ]
+    assert cached["moves_version_group"] == "emerald"
+
+
+def test_payload_without_learnset_leaves_null_and_never_erases_a_known_one(tmp_path):
+    repository = SQLiteSpeciesCacheRepository(tmp_path / "pokedex.db")
+
+    repository.put("pikachu", "regular", payload(), "first")
+    first = repository.get("pikachu", "regular")
+    # NULL significa «aún sin learnset»: el combate lo pedirá a PokeAPI.
+    assert first["level_moves"] is None
+    assert first["moves_version_group"] is None
+
+    with_learnset = payload()
+    with_learnset["level_moves"] = [["thunder-shock", 1]]
+    with_learnset["moves_version_group"] = "emerald"
+    repository.put("pikachu", "regular", with_learnset, "second")
+    repository.put("pikachu", "regular", payload(30), "third")
+
+    kept = repository.get("pikachu", "regular")
+    assert kept["pokedex_id"] == 30
+    assert kept["fetched_at"] == "third"
+    assert json.loads(kept["level_moves"]) == [["thunder-shock", 1]]
+    assert kept["moves_version_group"] == "emerald"
+
+
+def test_a_present_learnset_key_always_replaces_the_cached_one(tmp_path):
+    repository = SQLiteSpeciesCacheRepository(tmp_path / "pokedex.db")
+    original = payload()
+    original["level_moves"] = [["thunder-shock", 1]]
+    original["moves_version_group"] = "emerald"
+    repository.put("pikachu", "regular", original, "first")
+
+    without_moves = payload()
+    without_moves["level_moves"] = []
+    without_moves["moves_version_group"] = None
+    repository.put("pikachu", "regular", without_moves, "second")
+
+    cached = repository.get("pikachu", "regular")
+    assert json.loads(cached["level_moves"]) == []
+    assert cached["moves_version_group"] is None
+
+
+def test_battle_pool_lists_species_with_complete_stats_only(tmp_path):
+    repository = SQLiteSpeciesCacheRepository(tmp_path / "pokedex.db")
+    mewtwo = payload(150)
+    mewtwo.update(types=["psychic"], is_legendary=True)
+    zeraora = payload(807)
+    zeraora.update(types=["electric"], is_mythical=True)
+    incomplete = payload(132)
+    incomplete["spe"] = None
+    repository.put("pikachu", "regular", payload(), "now")
+    repository.put("mewtwo", "regular", mewtwo, "now")
+    repository.put("zeraora", "regular", zeraora, "now")
+    repository.put("ditto", "regular", incomplete, "now")
+    repository.put("raichu", "alola", {**payload(26), "types": ["electric", "psychic"]}, "now")
+
+    assert repository.battle_pool() == [
+        {
+            "species": "mewtwo",
+            "form": "regular",
+            "types": ["psychic"],
+            "is_legendary": True,
+            "is_mythical": False,
+        },
+        {
+            "species": "pikachu",
+            "form": "regular",
+            "types": ["electric"],
+            "is_legendary": False,
+            "is_mythical": False,
+        },
+        {
+            "species": "raichu",
+            "form": "alola",
+            "types": ["electric", "psychic"],
+            "is_legendary": False,
+            "is_mythical": False,
+        },
+        {
+            "species": "zeraora",
+            "form": "regular",
+            "types": ["electric"],
+            "is_legendary": False,
+            "is_mythical": True,
+        },
+    ]
+
+
+def test_battle_pool_is_empty_without_cached_species(tmp_path):
+    assert SQLiteSpeciesCacheRepository(tmp_path / "pokedex.db").battle_pool() == []
+
+
 def test_refresh_catalog_lists_unique_captures_and_clears_all_cached_profiles(tmp_path):
     path = tmp_path / "pokedex.db"
     repository = SQLiteSpeciesCacheRepository(path)

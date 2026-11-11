@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from rich.console import Console
 from rich.live import Live
+from rich.markup import escape
 from rich.table import Table
 from rich.text import Text
 
@@ -74,9 +75,34 @@ def cmd_hook(args: argparse.Namespace) -> int:
                 pokemon.shiny,
                 sprite_renderer=_sprite_renderer(),
             )
-        composition.clear_encounter()
-        return 0
+        # Un combate salvaje en pausa necesita su encuentro: borrarlo lo
+        # dejaría huérfano.
+        if result.battle_reminder is None:
+            composition.clear_encounter()
+    _print_battle_reminder(result.battle_reminder)
     return 0
+
+
+def _print_battle_reminder(name: str | None) -> None:
+    if name is not None:
+        console.print(
+            f"[dim]Combate en pausa contra {escape(name)} salvaje: sigue con `pokedex combate`.[/]",
+            highlight=False,
+        )
+
+
+def _active_wild_battle_name() -> str | None:
+    """Rival del combate salvaje en pausa sobre el encuentro actual (o None)."""
+    return composition.active_wild_battle_name()
+
+
+def _wild_battle_guard() -> int | None:
+    """Con un combate salvaje en marcha, las órdenes sueltas no tocan su encuentro."""
+    name = _active_wild_battle_name()
+    if name is None:
+        return None
+    print(f"Estás combatiendo contra {name}: usa la BOLSA en `pokedex combate`.")
+    return 1
 
 
 def cmd_ver(args: argparse.Namespace) -> int:
@@ -104,6 +130,8 @@ def cmd_ver(args: argparse.Namespace) -> int:
     mood = _encounter_mood(last_seen)
     if mood:
         estado += f" · {mood}"
+    if _active_wild_battle_name() is not None:
+        estado += " · en combate"
     print(f"{name} — {estado}")
     if args.debug:
         _print_safari_debug(_encounter_safari_state(last_seen))
@@ -171,6 +199,9 @@ def _throw_safari_item(action: safari_rules.SafariAction, args: argparse.Namespa
     if last_seen["captured"]:
         print("Ya capturaste a este Pokémon. Espera a que aparezca otro (abre otra terminal).")
         return 0
+    guarded = _wild_battle_guard()
+    if guarded is not None:
+        return guarded
 
     # Los datos de especie solo hacen falta para fijar la paciencia inicial: si
     # el encuentro ya la tiene, este turno no toca red ni caché.
@@ -269,7 +300,7 @@ def _choose_ball(args: argparse.Namespace, current_inventory: dict) -> Ball:
             answer = ""
         if not answer:
             return available[0]
-        if answer.isdigit() and 1 <= int(answer) <= len(available):
+        if answer.isdecimal() and 1 <= int(answer) <= len(available):
             return available[int(answer) - 1]
         print("Opción no válida.")
 
@@ -282,6 +313,9 @@ def cmd_capturar(args: argparse.Namespace) -> int:
     if last_seen["captured"]:
         print("Ya capturaste a este Pokémon. Espera a que aparezca otro (abre otra terminal).")
         return 0
+    guarded = _wild_battle_guard()
+    if guarded is not None:
+        return guarded
 
     species, form, shiny = last_seen["species"], last_seen["form"], last_seen["shiny"]
 
@@ -497,12 +531,66 @@ def cmd_search(args: argparse.Namespace) -> int:
     return 0
 
 
-def _read_menu_key() -> str:
-    """Lee una tecla sin requerir Enter y normaliza flechas/vi/escape."""
+# Teclas de los menús sin Enter. Las flechas llegan como ESC + "[" + letra (o
+# "O" + letra en modo aplicación); hjkl hacen lo mismo, como en vi. Z y el
+# espacio confirman y X retrocede, como los botones A y B de la consola.
+_MENU_KEYS = {
+    "\x1b[A": "up",
+    "\x1bOA": "up",
+    "k": "up",
+    "K": "up",
+    "\x1b[B": "down",
+    "\x1bOB": "down",
+    "j": "down",
+    "J": "down",
+    "\x1b[D": "left",
+    "\x1bOD": "left",
+    "h": "left",
+    "H": "left",
+    "\x1b[C": "right",
+    "\x1bOC": "right",
+    "l": "right",
+    "L": "right",
+    "\r": "enter",
+    "\n": "enter",
+    " ": "enter",
+    "z": "enter",
+    "Z": "enter",
+    "\x1b": "cancel",
+    "x": "cancel",
+    "X": "cancel",
+    "\x7f": "cancel",
+    "q": "quit",
+    "Q": "quit",
+    # En modo crudo Ctrl+C no levanta SIGINT: llega como un byte más.
+    "\x03": "interrupt",
+}
+
+
+def _menu_key_name(raw: str) -> str:
+    """Nombre de una tecla leída en crudo: un dígito se devuelve tal cual."""
+    if len(raw) == 1 and raw in "123456789":
+        return raw
+    return _MENU_KEYS.get(raw, "other")
+
+
+def _read_menu_key(timeout: float | None = None, *, raw: bool = True) -> str | None:
+    """Lee una tecla sin requerir Enter y la normaliza.
+
+    Devuelve ``up``/``down``/``left``/``right`` (flechas o hjkl), ``enter``
+    (Enter, Z o espacio), ``cancel`` (Esc, X o retroceso), ``quit`` (Q), el
+    dígito pulsado u ``other``. Con ``timeout`` (segundos) no bloquea: si vence
+    sin pulsación devuelve ``None``. ``raw`` pone la terminal en crudo solo
+    durante la lectura; la pantalla de combate ya la tiene en cbreak durante
+    todo el combate y pasa ``False``.
+    """
     fd = sys.stdin.fileno()
-    previous = termios.tcgetattr(fd)
+    previous = termios.tcgetattr(fd) if raw else None
     try:
-        tty.setraw(fd)
+        if raw:
+            tty.setraw(fd)
+        if timeout is not None and not select.select([sys.stdin], [], [], max(0.0, timeout))[0]:
+            return None
         key = os.read(fd, 1).decode(errors="ignore")
         if key == "\x1b":
             # Una flecha llega como ESC + "[" + letra. Los tres bytes pueden
@@ -513,20 +601,9 @@ def _read_menu_key() -> str:
                     break
                 key += os.read(fd, 1).decode(errors="ignore")
     finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, previous)
-    return {
-        "\x1b[A": "up",
-        "k": "up",
-        "K": "up",
-        "\x1b[B": "down",
-        "j": "down",
-        "J": "down",
-        "\r": "enter",
-        "\n": "enter",
-        "q": "cancel",
-        "Q": "cancel",
-        "\x1b": "cancel",
-    }.get(key, "other")
+        if previous is not None:
+            termios.tcsetattr(fd, termios.TCSADRAIN, previous)
+    return _menu_key_name(key)
 
 
 def _team_picker_table(
@@ -574,14 +651,19 @@ def _select_capture_for_team(action: team_application.TeamAction, name: str | No
         else queries.team()
     )
     if name is not None:
-        expected = normalize_species(name)
-        rows = [
-            row
-            for row in rows
-            if row["species"] == expected
-            or normalize_species(_display_name(row["species"], row["form"])) == expected
-            or normalize_species(f"{row['species']}-{row['form']}") == expected
-        ]
+        try:
+            expected = normalize_species(name)
+        except ValueError:
+            # Un nombre sin letras ni números («?») no encaja con ninguna captura.
+            rows = []
+        else:
+            rows = [
+                row
+                for row in rows
+                if row["species"] == expected
+                or normalize_species(_display_name(row["species"], row["form"])) == expected
+                or normalize_species(f"{row['species']}-{row['form']}") == expected
+            ]
     if not rows:
         if name is not None:
             scope = "fuera" if action is team_application.TeamAction.ADD else "dentro"
@@ -624,7 +706,7 @@ def _select_capture_for_team(action: team_application.TeamAction, name: str | No
                 selected = (selected + 1) % len(rows)
             elif key == "enter":
                 return int(rows[selected]["id"])
-            elif key == "cancel":
+            elif key in ("cancel", "quit", "interrupt"):
                 return None
             live.update(_team_picker_table(rows, selected, action), refresh=True)
 
@@ -660,15 +742,47 @@ def cmd_vision(args: argparse.Namespace) -> int:
             row = refreshed
 
     sprite = _sprite_renderer().capture_sprite(row["species"], row["form"], bool(row["shiny"]))
-    display.render_vision_card(console, row, sprite)
+    moveset = _vision_moveset(row)
+    display.render_vision_card(
+        console,
+        row,
+        sprite,
+        moves=moveset.moves if moveset is not None else None,
+        custom_moves=moveset.custom if moveset is not None else False,
+    )
     return 0
+
+
+def _vision_moveset(row: dict):
+    """Moveset de la captura para la ficha, o None si aún no se puede calcular.
+
+    Como el resto de la ficha, una caché antigua sin learnset se cura sola al
+    mirarla (una descarga). Si sigue sin learnset (sin conexión) la ficha sale
+    sin movimientos en vez de volver a intentarlo. Es decorativo: un fallo
+    nunca impide ver la ficha.
+    """
+    try:
+        species_data = _species_data_use_case()
+        cache = species_data.execute(row["species"], row["form"])
+        if cache is not None and cache.get("level_moves") is None:
+            cache = species_data.execute(row["species"], row["form"], refresh=True)
+        if cache is None or cache.get("level_moves") is None:
+            return None
+        return _manage_moveset_use_case().view(str(row["id"]))
+    except Exception as error:  # la ficha se ve igual sin la sección
+        composition.record_failure("vision moveset", error)
+        return None
+
+
+def _manage_moveset_use_case():
+    return composition.manage_moveset()
 
 
 def cmd_equipo(args: argparse.Namespace) -> int:
     if args.accion is not None:
         action = team_application.TeamAction(args.accion)
         raw_identifier = args.id
-        if raw_identifier is not None and str(raw_identifier).isdigit():
+        if raw_identifier is not None and str(raw_identifier).isdecimal():
             capture_id = int(raw_identifier)
         else:
             capture_id = _select_capture_for_team(action, raw_identifier)
@@ -729,6 +843,7 @@ def _open_terminal_use_case(write_last_seen) -> hook_application.OpenTerminal:
         prepare_evolution=lambda evolution: _species_data_use_case().execute(
             evolution.target_species, evolution.target_form
         ),
+        battle_in_progress=_active_wild_battle_name,
     )
 
 
@@ -937,6 +1052,73 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     return 1
 
 
+# El modo combate se importa al usarlo: el hook de cada terminal no paga su coste.
+
+
+def cmd_combate(args: argparse.Namespace) -> int:
+    from pokedex_cli.presentation import battle_cli
+
+    return battle_cli.run_combat(args, console=console, services=_battle_services())
+
+
+def cmd_demo_combate(args: argparse.Namespace) -> int:
+    from pokedex_cli.presentation import battle_cli
+
+    return battle_cli.run_exhibition(args, console=console, services=_battle_services())
+
+
+def cmd_movimientos(args: argparse.Namespace) -> int:
+    from pokedex_cli.presentation import battle_cli
+
+    return battle_cli.run_moves(args, console=console, manager=_manage_moveset_use_case())
+
+
+def _battle_services():
+    from pokedex_cli.presentation import battle_cli
+
+    return battle_cli.default_services(
+        read_key=_read_menu_key, sync_inventory=_sync_battle_inventory
+    )
+
+
+def _sync_battle_inventory() -> dict:
+    """Recompensas y entrenamiento al día antes de combatir; devuelve el inventario."""
+    activity, training = _sync_training()
+    _print_activity_rewards(activity)
+    _print_training(training)
+    return activity.inventory
+
+
+def _battle_speed(value: str) -> float:
+    try:
+        speed = float(value.replace(",", "."))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"velocidad no válida: {value}") from None
+    if not speed >= 0 or speed == float("inf"):
+        raise argparse.ArgumentTypeError("la velocidad es un factor de 0 en adelante")
+    return speed
+
+
+def _add_battle_display_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="la IA elige tus órdenes (también cuando stdin se agota)",
+    )
+    parser.add_argument(
+        "--velocidad",
+        type=_battle_speed,
+        default=1.0,
+        metavar="F",
+        help="multiplica las pausas: 0.5 más rápido, 2 más pausado, 0 instantáneo",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="muestra cifras internas: daño de cada golpe y probabilidad de captura",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pokedex",
@@ -959,6 +1141,10 @@ def build_parser() -> argparse.ArgumentParser:
             "  pokedex list                    tus capturas\n"
             "  pokedex search charizard -f mega-x     ficha de una forma concreta\n"
             "  pokedex equipo add 3            mete la captura #3 en tu equipo\n"
+            "  pokedex combate                 lucha contra el Pokémon que espera\n"
+            "  pokedex combate -e              lucha contra un entrenador\n"
+            "  pokedex demo-combate 4 106      exhibición entre dos capturas tuyas\n"
+            "  pokedex movimientos 3           ve y elige los movimientos de la #3\n"
             "  pokedex refresh                 recarga los datos de tus capturas\n"
             "  pokedex demo                    prueba la animación sin capturar\n"
             "  pokedex demo -a roca            prueba la animación de la roca\n"
@@ -1129,6 +1315,87 @@ def build_parser() -> argparse.ArgumentParser:
         help="id o nombre de Pokémon; si se omite, abre el selector interactivo",
     )
     equipo_parser.set_defaults(func=cmd_equipo)
+
+    combate_parser = subparsers.add_parser(
+        "combate",
+        aliases=["batalla"],
+        help="combate por turnos contra el Pokémon que espera (o un entrenador)",
+        description="Lucha con tu equipo contra el Pokémon salvaje que espera en la "
+        "terminal: debilítalo o déjalo con un problema de estado para capturarlo con la "
+        "BOLSA, o noquéalo para ganar EXP. Con -e luchas contra un entrenador generado "
+        "con especies de tu caché, a la altura de tu equipo (EXP ×1,5 y racha). El "
+        "combate se guarda turno a turno: Q o Ctrl+C lo dejan en pausa y `pokedex "
+        "combate` lo reanuda. Sin terminal interactiva lee órdenes por stdin (1-4 "
+        "movimiento, c N cambio, b [bola], h huir, a IA, q pausa).",
+    )
+    combate_parser.add_argument(
+        "-e",
+        "--entrenador",
+        action="store_true",
+        help="lucha contra un entrenador generado en vez del Pokémon salvaje",
+    )
+    _add_battle_display_options(combate_parser)
+    combate_parser.set_defaults(func=cmd_combate)
+
+    demo_combate_parser = subparsers.add_parser(
+        "demo-combate",
+        help="exhibición de combate sin guardar nada",
+        description="Combate de exhibición de un Pokémon por lado, sin EXP ni nada que "
+        "guardar. A y B son ids de captura (sus stats, nivel y movimientos reales) o "
+        "nombres de especie (individuo fijo a nivel 50). Sin A lucha tu líder de equipo "
+        "y sin B, una especie al azar de tu caché.",
+    )
+    demo_combate_parser.add_argument(
+        "primero",
+        nargs="?",
+        metavar="A",
+        help="id de captura o especie de tu lado (por defecto: tu líder de equipo)",
+    )
+    demo_combate_parser.add_argument(
+        "segundo",
+        nargs="?",
+        metavar="B",
+        help="id de captura o especie rival (por defecto: una especie al azar)",
+    )
+    demo_combate_parser.add_argument(
+        "-n",
+        "--nivel",
+        type=int,
+        default=None,
+        metavar="NIVEL",
+        help="nivel de los dos, 1-100 (por defecto: el de cada captura o 50)",
+    )
+    _add_battle_display_options(demo_combate_parser)
+    demo_combate_parser.set_defaults(func=cmd_demo_combate)
+
+    movimientos_parser = subparsers.add_parser(
+        "movimientos",
+        help="ve y elige los 4 movimientos de una captura",
+        description="Muestra los movimientos con los que lucha una captura (tipo, "
+        "clase, potencia, precisión y PP) y los que puede aprender. Sin moveset propio "
+        "usa uno automático que mejora al subir de nivel.",
+    )
+    movimientos_parser.add_argument(
+        "pokemon",
+        metavar="ID|NOMBRE",
+        help="id de captura (como en `pokedex list`) o nombre de un Pokémon capturado",
+    )
+    moveset_choice = movimientos_parser.add_mutually_exclusive_group()
+    # Un solo valor (la lista va separada por comas): con varios, --set se
+    # tragaría el ID escrito detrás y no casaría con los completados.
+    moveset_choice.add_argument(
+        "--set",
+        metavar="MOVIMIENTOS",
+        help="fija un moveset propio: de 1 a 4 movimientos separados por comas "
+        "(slugs o nombres en español; entre comillas o con guiones si llevan "
+        'espacios), p. ej. --set ascuas,arañazo o --set "pistola agua,placaje"',
+    )
+    moveset_choice.add_argument(
+        "--auto",
+        action="store_true",
+        help="vuelve al moveset automático",
+    )
+    movimientos_parser.set_defaults(func=cmd_movimientos)
 
     tipos_parser = subparsers.add_parser(
         "tipos",

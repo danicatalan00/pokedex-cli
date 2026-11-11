@@ -82,6 +82,29 @@ def test_every_recorded_historical_schema_upgrades_without_losing_captures(
             "base_happiness",
             "hatch_counter",
             "evolution_chain",
+            "level_moves",
+            "moves_version_group",
+        }
+        assert database._columns(upgraded, "move_cache") == {"slug", "record", "fetched_at"}
+        assert database._columns(upgraded, "capture_moves") == {"capture_id", "slot", "move"}
+        assert database._columns(upgraded, "battle_state") == {
+            "singleton",
+            "kind",
+            "state_json",
+            "encounter_seen_at",
+            "started_at",
+            "updated_at",
+        }
+        assert database._columns(upgraded, "battle_record") == {
+            "singleton",
+            "wild_battles",
+            "wild_wins",
+            "wild_captures",
+            "trainer_wins",
+            "trainer_losses",
+            "streak",
+            "best_streak",
+            "last_battle_at",
         }
     finally:
         upgraded.close()
@@ -354,3 +377,129 @@ def test_migration_012_starts_an_existing_encounter_neutral_and_bounds_the_stage
             upgraded.execute("UPDATE encounter_state SET item_turns = -1")
     finally:
         upgraded.close()
+
+
+def test_migration_013_marks_cached_species_without_learnset_and_guards_movesets(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "battle-data.db"
+    old = sqlite3.connect(path)
+    database.migrate(old, database.MIGRATIONS[:12])
+    old.execute(
+        "INSERT INTO species_cache (species, form, types, fetched_at) "
+        "VALUES ('pikachu', 'regular', '[\"electric\"]', 'then')"
+    )
+    old.execute(
+        "INSERT INTO captures (id, species, form, shiny, caught_at) "
+        "VALUES (7, 'pikachu', 'regular', 0, 'then')"
+    )
+    old.commit()
+    old.close()
+
+    upgraded = database.connect(path)
+    try:
+        row = upgraded.execute(
+            "SELECT level_moves, moves_version_group FROM species_cache"
+        ).fetchone()
+        # NULL = aún sin learnset: el combate sabrá que debe refrescar la especie.
+        assert (row["level_moves"], row["moves_version_group"]) == (None, None)
+
+        upgraded.execute(
+            "INSERT INTO capture_moves (capture_id, slot, move) VALUES (7, 3, 'growl')"
+        )
+        for slot in (-1, 4):
+            with pytest.raises(sqlite3.IntegrityError):
+                upgraded.execute(
+                    "INSERT INTO capture_moves (capture_id, slot, move) VALUES (7, ?, 'tackle')",
+                    (slot,),
+                )
+        with pytest.raises(sqlite3.IntegrityError):
+            upgraded.execute(
+                "INSERT INTO capture_moves (capture_id, slot, move) VALUES (7, 3, 'tackle')"
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            upgraded.execute(
+                "INSERT INTO capture_moves (capture_id, slot, move) VALUES (99, 0, 'tackle')"
+            )
+        upgraded.execute("DELETE FROM captures WHERE id = 7")
+        assert upgraded.execute("SELECT COUNT(*) FROM capture_moves").fetchone()[0] == 0
+        upgraded.commit()
+    finally:
+        upgraded.close()
+
+
+def test_migration_014_keeps_one_battle_and_a_non_negative_record(tmp_path: Path) -> None:
+    connection = database.connect(tmp_path / "battles.db")
+    try:
+        connection.execute(
+            "INSERT INTO battle_state (singleton, kind, state_json, started_at, updated_at) "
+            "VALUES (1, 'wild', '{}', 'now', 'now')"
+        )
+        invalid_battles = [
+            (2, "wild"),  # un solo combate a la vez
+            (1, "exhibition"),  # las exhibiciones nunca se guardan
+        ]
+        for singleton, kind in invalid_battles:
+            with pytest.raises(sqlite3.IntegrityError):
+                connection.execute(
+                    "INSERT OR REPLACE INTO battle_state "
+                    "(singleton, kind, state_json, started_at, updated_at) "
+                    "VALUES (?, ?, '{}', 'now', 'now')",
+                    (singleton, kind),
+                )
+
+        connection.execute("INSERT INTO battle_record (singleton) VALUES (1)")
+        record = connection.execute("SELECT * FROM battle_record").fetchone()
+        assert dict(record) == {
+            "singleton": 1,
+            "wild_battles": 0,
+            "wild_wins": 0,
+            "wild_captures": 0,
+            "trainer_wins": 0,
+            "trainer_losses": 0,
+            "streak": 0,
+            "best_streak": 0,
+            "last_battle_at": None,
+        }
+        for column in (
+            "wild_battles",
+            "wild_wins",
+            "wild_captures",
+            "trainer_wins",
+            "trainer_losses",
+            "streak",
+            "best_streak",
+        ):
+            with pytest.raises(sqlite3.IntegrityError):
+                connection.execute(f"UPDATE battle_record SET {column} = -1")
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute("INSERT INTO battle_record (singleton) VALUES (2)")
+    finally:
+        connection.rollback()
+        connection.close()
+
+
+@pytest.mark.parametrize(
+    "migration",
+    [database._migration_013_battle_data, database._migration_014_battles],
+)
+def test_battle_migrations_are_idempotent_when_rerun_directly(tmp_path: Path, migration) -> None:
+    connection = database.connect(tmp_path / "rerun.db")
+    try:
+        connection.execute(
+            "INSERT INTO captures (id, species, form, shiny, caught_at) "
+            "VALUES (1, 'pikachu', 'regular', 0, 'now')"
+        )
+        connection.execute(
+            "INSERT INTO capture_moves (capture_id, slot, move) VALUES (1, 0, 'growl')"
+        )
+        connection.execute("INSERT INTO battle_record (singleton, streak) VALUES (1, 3)")
+        connection.commit()
+
+        migration(connection)
+        migration(connection)
+
+        assert [row[0] for row in connection.execute("SELECT move FROM capture_moves")] == ["growl"]
+        assert connection.execute("SELECT streak FROM battle_record").fetchone()[0] == 3
+    finally:
+        connection.close()
